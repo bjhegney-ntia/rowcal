@@ -139,7 +139,7 @@ function rowcalE2E_(out) {
   ok('editing an imported row updates its event', s9.counts.update === 1 && s9.counts.create === 0 && events().length === total, JSON.stringify(s9.counts));
 
   // ---- run log
-  var log = ss.getSheetByName('Rowcal Log');
+  var log = ss.getSheetByName('Minutehand Log');
   ok('run log has a line per run', !!log && log.getLastRow() >= 10, log && log.getLastRow());
   ss.setActiveSheet(sheet);
   return finish_(ss, out);
@@ -197,7 +197,7 @@ function devDemo() {
     ['Launch day', '11/23/2026', '', '', '', ''],
     ['Launch webinar', '11/23/2026', '1:00 PM', '2:00 PM', 'Zoom', '200 registered'],
     ['Retro', '11/30/2026', '9:30 AM', '10:15 AM', 'Room 4', 'What to keep, what to drop'],
-    ['Follow-up emails (date TBD)', '', '', '', '', 'No date yet, so Rowcal skips it']
+    ['Follow-up emails (date TBD)', '', '', '', '', 'No date yet, so Minutehand skips it']
   ];
   sheet.getRange(1, 1, rows.length, 6).setValues(rows);
   sheet.getRange(1, 1, 1, 6).setFontWeight('bold').setBackground('#f1f3f4');

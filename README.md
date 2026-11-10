@@ -1,4 +1,4 @@
-# Rowcal
+# Minutehand
 
 Google Sheets add-on: rows → Calendar events with a preview first. Apps Script, no servers.
 
@@ -9,7 +9,7 @@ Google Sheets add-on: rows → Calendar events with a preview first. Apps Script
 
 ## Deploy (one-time setup, needs Brian's Google login)
 1. `npx @google/clasp login` (opens a browser once)
-2. `npx @google/clasp create --type sheets --title "Rowcal" --rootDir src` (creates a bound test sheet + script)
-3. `npx @google/clasp push` then open the sheet → Extensions → Rowcal → Open Rowcal
+2. `npx @google/clasp create --type sheets --title "Minutehand" --rootDir src` (creates a bound test sheet + script)
+3. `npx @google/clasp push` then open the sheet → Extensions → Minutehand → Open Minutehand
 4. Script properties (Apps Script editor → Project settings): `STRIPE_RESTRICTED_KEY` (read-only on Customers and Subscriptions), `UPGRADE_URL` (Stripe payment link)
 5. Marketplace: Cloud project → OAuth consent (brand verification; sensitive scopes only, no CASA) → Marketplace SDK → listing → submit

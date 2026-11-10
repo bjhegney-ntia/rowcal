@@ -16,7 +16,7 @@
   .scroll{max-height:230px;overflow:auto;margin-top:6px}
   .check{display:flex;align-items:center;gap:8px;margin-top:8px;color:#202124;font-size:13px}
 </style></head><body>
-<h2>Rowcal</h2>
+<h2>Minutehand</h2>
 <div class="muted">Rows in <b id="sheetName"></b> become calendar events. Nothing changes until you press Sync. <a href="#" onclick="repin();return false;">Use the tab I'm on</a></div>
 
 <h3>1. Calendar</h3>
@@ -92,7 +92,7 @@ function save(patch){ run('saveSettings', patch, S.sheetId).then(render).catch(f
 function renderPlan(){
   var b = document.getElementById('planBox');
   if (S.pro) {
-    b.innerHTML = '<b>Rowcal Pro</b> · unlimited changes, hourly auto-sync<br><span class="small muted">'+esc(S.licenseEmail)+' · <a href="#" onclick="run(\'removeLicense\', S.sheetId).then(render);return false;">sign out</a></span>' +
+    b.innerHTML = '<b>Minutehand Pro</b> · unlimited changes, hourly auto-sync<br><span class="small muted">'+esc(S.licenseEmail)+' · <a href="#" onclick="run(\'removeLicense\', S.sheetId).then(render);return false;">sign out</a></span>' +
       '<label class="check"><input type="checkbox" id="autoSync" '+(S.autoSync?'checked':'')+' onchange="toggleAuto(this.checked)"> Auto-sync this sheet every hour</label>';
   } else {
     var left = Math.max(0, S.freeLimit - S.usage);

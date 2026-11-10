@@ -1,7 +1,7 @@
 const assert = require('assert');
 const R = require('../src/Lib.js');
 
-const headers = ['Title', 'Date', 'Start time', 'End time', 'Where', 'Notes', 'Rowcal ID'];
+const headers = ['Title', 'Date', 'Start time', 'End time', 'Where', 'Notes', 'Minutehand ID'];
 const map = R.autoMap(headers);
 assert.deepStrictEqual([map.title, map.start, map.startTime, map.endTime, map.location, map.description, map.id], [0, 1, 2, 3, 4, 5, 6]);
 assert.strictEqual(map.end, -1);

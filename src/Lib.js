@@ -1,9 +1,9 @@
 /**
- * Rowcal pure logic. No Apps Script services here, so it runs in Node tests.
+ * Minutehand pure logic. No Apps Script services here, so it runs in Node tests.
  * Loaded in Apps Script as a global `ROWCAL`.
  */
 var ROWCAL = (function () {
-  var ID_HEADER = 'Rowcal ID';
+  var ID_HEADER = 'Minutehand ID';
   var FIELDS = ['title', 'start', 'startTime', 'end', 'endTime', 'description', 'location', 'allDay', 'calendar'];
   var SYNONYMS = {
     title: ['title', 'event', 'event title', 'event name', 'subject', 'name', 'summary', 'what'],

@@ -1,14 +1,14 @@
-/** Rowcal: Sheets → Calendar sync with a preview first. Apps Script side. */
+/** Minutehand: Sheets → Calendar sync with a preview first. Apps Script side. */
 
 var FREE_MONTHLY_CHANGES = 50;
-var LOG_SHEET = 'Rowcal Log';
+var LOG_SHEET = 'Minutehand Log';
 
 function onInstall(e) { onOpen(e); }
 function onOpen(e) {
-  SpreadsheetApp.getUi().createAddonMenu().addItem('Open Rowcal', 'showSidebar').addToUi();
+  SpreadsheetApp.getUi().createAddonMenu().addItem('Open Minutehand', 'showSidebar').addToUi();
 }
 function showSidebar() {
-  var html = HtmlService.createHtmlOutputFromFile('Sidebar').setTitle('Rowcal');
+  var html = HtmlService.createHtmlOutputFromFile('Sidebar').setTitle('Minutehand');
   SpreadsheetApp.getUi().showSidebar(html);
 }
 
@@ -19,7 +19,7 @@ function sheet_(sheetId) {
   if (sheetId === undefined || sheetId === null) return ss.getActiveSheet();
   return ss.getSheets().filter(function (s) { return s.getSheetId() === Number(sheetId); })[0] || null;
 }
-var NO_SHEET = { error: 'That tab no longer exists. Reopen Rowcal on the tab you want to sync.' };
+var NO_SHEET = { error: 'That tab no longer exists. Reopen Minutehand on the tab you want to sync.' };
 
 // ---------- settings ----------
 function sheetKey_(sheet) { return 'rowcal_' + sheet.getSheetId(); }
@@ -60,7 +60,7 @@ function effectiveMap_(sheet, settings) {
 function getState(sheetId) {
   var sheet = sheet_(sheetId);
   if (!sheet) return NO_SHEET;
-  if (sheet.getName() === LOG_SHEET) return { error: 'This is Rowcal\'s own log tab. Open Rowcal on the tab that holds your events.' };
+  if (sheet.getName() === LOG_SHEET) return { error: 'This is Minutehand\'s own log tab. Open Minutehand on the tab that holds your events.' };
   var settings = getSettings_(sheet);
   var headers = headers_(sheet);
   var lic = licenseState_();
@@ -343,7 +343,7 @@ function activateLicense(email, sheetId) {
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { error: 'Enter the email you used at checkout.' };
   var ok = stripeHasActiveSubscription_(email);
   if (ok === null) return { error: 'Could not reach the licence server. Try again in a minute.' };
-  if (!ok) return { error: 'No active Rowcal Pro subscription found for ' + email + '.' };
+  if (!ok) return { error: 'No active Minutehand Pro subscription found for ' + email + '.' };
   userProps_().setProperties({ rowcal_license_email: email, rowcal_license_until: String(Date.now() + 86400000) });
   return getState(sheetId);
 }
