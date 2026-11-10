@@ -4,6 +4,11 @@
  */
 function rowcalE2E() {
   var out = [];
+  try { return rowcalE2E_(out); }
+  catch (e) { out.push('FAIL  harness threw: ' + e.message + ' @ ' + (e.stack || '').split('\n')[1]); return finish_(SpreadsheetApp.getActiveSpreadsheet(), out); }
+}
+function rowcalE2E_(out) {
+  function S(label, r) { if (r.error) out.push('NOTE  ' + label + ' returned: ' + r.error); r.counts = r.counts || {}; r.errors = r.errors || [r.error]; return r; }
   function ok(name, cond, extra) { out.push((cond ? 'PASS  ' : 'FAIL  ') + name + (extra !== undefined ? '  [' + extra + ']' : '')); }
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   ss.setSpreadsheetTimeZone('America/Los_Angeles'); // deliberately not the script zone (UTC)
@@ -50,7 +55,7 @@ function rowcalE2E() {
   ok('preview shows sheet-local times', p.sample.some(function (s) { return s.title === 'Dentist' && s.when.indexOf('9:30 AM') >= 0; }), p.sample.map(function (s) { return s.title + ' ' + s.when; }).join(' | '));
 
   // ---- first sync
-  var s1 = sync(false);
+  var s1 = S('s1', sync(false));
   ok('sync 1: no errors', s1.errors && s1.errors.length === 0, JSON.stringify(s1.errors || s1));
   ok('sync 1: 4 events on calendar', events().length === 4, events().length);
   var den = byTitle('Dentist')[0];
@@ -65,13 +70,13 @@ function rowcalE2E() {
   ok('usage counted 4', usageThisMonth_() === 4, usageThisMonth_());
 
   // ---- re-sync: no duplicates
-  var s2 = sync(false);
+  var s2 = S('s2', sync(false));
   ok('sync 2: nothing to do', s2.counts.create === 0 && s2.counts.update === 0 && s2.deleted === 0, JSON.stringify(s2.counts));
   ok('sync 2: still 4 events (no duplicates)', events().length === 4, events().length);
 
   // ---- edit a row: update in place
   sheet.getRange(2, 1).setValue('Dentist (moved)'); sheet.getRange(2, 3, 1, 2).setValues([['11:00 AM', '11:45 AM']]); SpreadsheetApp.flush();
-  var s3 = sync(false);
+  var s3 = S('s3', sync(false));
   var den2 = byTitle('Dentist (moved)')[0];
   ok('edit = 1 update, 0 create', s3.counts.update === 1 && s3.counts.create === 0, JSON.stringify(s3.counts));
   ok('same event id, new title and time', den2 && den && den2.id === den.id && local(den2) === '2026-11-16 11:00>11:45', den2 && local(den2));
@@ -79,21 +84,21 @@ function rowcalE2E() {
 
   // ---- delete a row: event removed
   sheet.deleteRow(3); SpreadsheetApp.flush();
-  var s4 = sync(false);
+  var s4 = S('s4', sync(false));
   ok('deleted row removes its event', s4.deleted === 1 && byTitle('Team offsite').length === 0 && events().length === 3, JSON.stringify(s4.counts) + ' events=' + events().length);
 
   // ---- delete-removed switched off: event stays
   saveSettings({ deleteRemoved: false });
   var lastRow = sheet.getLastRow(); // Client call
   sheet.deleteRow(lastRow); SpreadsheetApp.flush();
-  var s5 = sync(false);
+  var s5 = S('s5', sync(false));
   ok('with delete off, removed row keeps its event', s5.deleted === 0 && byTitle('Client call').length === 1, 'deleted=' + s5.deleted);
   saveSettings({ deleteRemoved: true });
 
   // ---- event deleted by hand in Calendar, then row edited: recreated, not an error
   Calendar.Events.remove(calId, q.id);
   sheet.getRange(3, 6).setValue('Edited after the event was deleted in Calendar'); SpreadsheetApp.flush();
-  var s6 = sync(false);
+  var s6 = S('s6', sync(false));
   ok('event kept while delete was off is still there after delete is back on', byTitle('Client call').length === 1);
   ok('hand-deleted event is recreated on next edit', s6.errors.length === 0 && byTitle('Quarterly review').length === 1, JSON.stringify(s6.errors) + ' n=' + byTitle('Quarterly review').length);
 
@@ -101,11 +106,11 @@ function rowcalE2E() {
   userProps_().setProperty('rowcal_usage_' + ROWCAL.monthKey(), String(FREE_MONTHLY_CHANGES - 1));
   sheet.getRange(sheet.getLastRow() + 1, 1, 2, 4).setValues([['Extra A', '11/23/2026', '9:00 AM', ''], ['Extra B', '11/24/2026', '9:00 AM', '']]); SpreadsheetApp.flush();
   var before = events().length;
-  var s7 = sync(false);
+  var s7 = S('s7', sync(false));
   ok('free limit: sync refused with a clear message', !!s7.limit && /free plan/.test(s7.error || ''), s7.error);
   ok('free limit: nothing changed', events().length === before, events().length);
   userProps_().setProperty('rowcal_usage_' + ROWCAL.monthKey(), '0');
-  var s8 = sync(false);
+  var s8 = S('s8', sync(false));
   ok('under the limit again: both created', s8.counts.create === 2 && s8.errors.length === 0, JSON.stringify(s8.counts));
 
   // ---- licence: no Stripe key configured means free, and a bad email is rejected politely
@@ -122,11 +127,14 @@ function rowcalE2E() {
   var i2 = importEvents('2026-11-01T00:00:00Z', '2026-12-01T00:00:00Z');
   ok('re-import adds nothing', i2.imported === 0, JSON.stringify(i2));
   var shown = imp.getRange(2, 1, imp.getLastRow() - 1, 3).getDisplayValues().map(function (r) { return r.join(' / '); }).join(' | ');
-  ok('imported times read in sheet-local time', /Dentist \(moved\) \/ 11\/16\/2026 11:00:00/.test(shown), shown);
+  ok('imported times read in sheet-local time', /Dentist \(moved\) \/ 11\/16\/2026 11:00 am/i.test(shown), shown);
+  var pin = preview(sheet.getSheetId());
+  ok('preview pinned to a tab ignores which tab is active', pin.counts && pin.counts.unchanged >= 4 && pin.counts.changes === 0, JSON.stringify(pin.counts || pin));
+  ok('first sync left the active tab alone (log tab did not steal it)', ss.getActiveSheet().getName() === 'Imported', ss.getActiveSheet().getName());
   var p2 = preview();
   ok('fresh import previews as nothing to change', p2.counts && p2.counts.changes === 0, JSON.stringify(p2.counts || p2));
   imp.getRange(2, 1).setValue(imp.getRange(2, 1).getValue() + ' *edited*'); SpreadsheetApp.flush();
-  var s9 = sync(false);
+  var s9 = S('s9', sync(false));
   ok('editing an imported row updates its event', s9.counts.update === 1 && s9.counts.create === 0 && events().length === total, JSON.stringify(s9.counts));
 
   // ---- run log
@@ -138,7 +146,8 @@ function rowcalE2E() {
 
 function finish_(ss, out) {
   var fails = out.filter(function (l) { return l.indexOf('FAIL') === 0; }).length;
-  out.push('RESULT: ' + (out.length - fails) + ' passed, ' + fails + ' failed');
+  var passes = out.filter(function (l) { return l.indexOf('PASS') === 0; }).length;
+  out.push('RESULT: ' + passes + ' passed, ' + fails + ' failed');
   var sh = ss.getSheetByName('E2E results') || ss.insertSheet('E2E results');
   sh.clear(); sh.getRange(1, 1, out.length, 1).setValues(out.map(function (l) { return [l]; }));
   Logger.log(out.join('\n'));

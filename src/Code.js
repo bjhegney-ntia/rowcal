@@ -12,6 +12,15 @@ function showSidebar() {
   SpreadsheetApp.getUi().showSidebar(html);
 }
 
+// ---------- which sheet ----------
+/** The sidebar passes the id of the tab it was opened on, so preview and sync always act on the same tab. */
+function sheet_(sheetId) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (sheetId === undefined || sheetId === null) return ss.getActiveSheet();
+  return ss.getSheets().filter(function (s) { return s.getSheetId() === Number(sheetId); })[0] || null;
+}
+var NO_SHEET = { error: 'That tab no longer exists. Reopen Rowcal on the tab you want to sync.' };
+
 // ---------- settings ----------
 function sheetKey_(sheet) { return 'rowcal_' + sheet.getSheetId(); }
 function docProps_() { return PropertiesService.getDocumentProperties(); }
@@ -22,12 +31,13 @@ function getSettings_(sheet) {
   if (s.deleteRemoved === undefined) s.deleteRemoved = true;
   return s;
 }
-function saveSettings(settings) {
-  var sheet = SpreadsheetApp.getActiveSheet();
+function saveSettings(settings, sheetId) {
+  var sheet = sheet_(sheetId);
+  if (!sheet) return NO_SHEET;
   var cur = getSettings_(sheet);
   Object.keys(settings).forEach(function (k) { cur[k] = settings[k]; });
   docProps_().setProperty(sheetKey_(sheet) + '_settings', JSON.stringify(cur));
-  return getState();
+  return getState(sheet.getSheetId());
 }
 function knownIds_(sheet) {
   var raw = docProps_().getProperty(sheetKey_(sheet) + '_known');
@@ -47,12 +57,15 @@ function effectiveMap_(sheet, settings) {
 }
 
 /** Everything the sidebar needs to render. */
-function getState() {
-  var sheet = SpreadsheetApp.getActiveSheet();
+function getState(sheetId) {
+  var sheet = sheet_(sheetId);
+  if (!sheet) return NO_SHEET;
+  if (sheet.getName() === LOG_SHEET) return { error: 'This is Rowcal\'s own log tab. Open Rowcal on the tab that holds your events.' };
   var settings = getSettings_(sheet);
   var headers = headers_(sheet);
   var lic = licenseState_();
   return {
+    sheetId: sheet.getSheetId(),
     sheetName: sheet.getName(),
     headers: headers.map(function (h, i) { return { i: i, name: String(h || ('Column ' + (i + 1))) }; }),
     map: effectiveMap_(sheet, settings),
@@ -106,8 +119,9 @@ function readRows_(sheet) {
   });
 }
 
-function preview() {
-  var sheet = SpreadsheetApp.getActiveSheet();
+function preview(sheetId) {
+  var sheet = sheet_(sheetId);
+  if (!sheet) return NO_SHEET;
   var settings = getSettings_(sheet);
   var map = effectiveMap_(sheet, settings);
   if (map.title < 0 || map.start < 0) return { error: 'Map at least a Title column and a Start date column.' };
@@ -147,13 +161,13 @@ function ensureIdColumn_(sheet, map) {
 }
 
 /** Apply the plan. Called by the sidebar after preview, and by the hourly trigger. */
-function sync(fromTrigger) {
+function sync(fromTrigger, sheetId) {
   var lock = LockService.getDocumentLock();
   if (!lock.tryLock(5000)) return { error: 'Another sync is running. Try again in a moment.' };
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheet = fromTrigger ? triggerSheet_(ss) : ss.getActiveSheet();
-    if (!sheet) return { error: 'The sheet set up for auto-sync no longer exists.' };
+    var sheet = fromTrigger ? triggerSheet_(ss) : sheet_(sheetId);
+    if (!sheet) return fromTrigger ? { error: 'The tab set up for auto-sync no longer exists.' } : NO_SHEET;
     var settings = getSettings_(sheet);
     var map = effectiveMap_(sheet, settings);
     if (map.title < 0 || map.start < 0 || !settings.calendarId) return { error: 'Set up the columns and calendar first.' };
@@ -202,8 +216,9 @@ function sync(fromTrigger) {
 }
 
 // ---------- import from calendar ----------
-function importEvents(fromIso, toIso) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet(), sheet = ss.getActiveSheet();
+function importEvents(fromIso, toIso, sheetId) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), sheet = sheet_(sheetId);
+  if (!sheet) return NO_SHEET;
   var settings = getSettings_(sheet);
   if (!settings.calendarId) return { error: 'Pick a calendar first.' };
   var tz = ss.getSpreadsheetTimeZone();
@@ -227,7 +242,7 @@ function importEvents(fromIso, toIso) {
     items = items.concat(res.items || []); token = res.nextPageToken;
   } while (token);
   var width = Math.max(sheet.getLastColumn(), map.id + 1);
-  var out = [], known = knownIds_(sheet);
+  var out = [], formats = [], known = knownIds_(sheet);
   items.forEach(function (ev) {
     if (!ev.summary || existing[ev.id]) return;
     var allDay = !!(ev.start && ev.start.date);
@@ -244,8 +259,15 @@ function importEvents(fromIso, toIso) {
     row[map.id] = d.skip ? ev.id : ROWCAL.formatIdCell(ev.id, ROWCAL.desiredHash(d));
     known.push(ev.id);
     out.push(row.map(function (v) { return Object.prototype.toString.call(v) === '[object Date]' ? fromWall_(v, tz) : v; }));
+    formats.push(allDay ? 'm/d/yyyy' : 'm/d/yyyy h:mm am/pm');
   });
-  if (out.length) sheet.getRange(sheet.getLastRow() + 1, 1, out.length, width).setValues(out);
+  if (out.length) {
+    var first = sheet.getLastRow() + 1;
+    sheet.getRange(first, 1, out.length, width).setValues(out);
+    var fcol = formats.map(function (f) { return [f]; });
+    sheet.getRange(first, map.start + 1, out.length, 1).setNumberFormats(fcol);
+    if (map.end >= 0) sheet.getRange(first, map.end + 1, out.length, 1).setNumberFormats(fcol);
+  }
   saveKnownIds_(sheet, known);
   log_(ss, 'import', sheet.getName(), out.length, 0, 0, items.length - out.length, []);
   return { imported: out.length, skipped: items.length - out.length };
@@ -256,15 +278,16 @@ function parseYmd_(s) { var m = s.split('-'); return new Date(+m[0], +m[1] - 1, 
 function hasTrigger_() {
   return ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'autoSync'; });
 }
-function setAutoSync(on) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+function setAutoSync(on, sheetId) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), sheet = sheet_(sheetId);
+  if (!sheet) return NO_SHEET;
   ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'autoSync') ScriptApp.deleteTrigger(t); });
   if (on) {
     if (!licenseState_().pro) return { error: 'Hourly auto-sync is a Pro feature.' };
-    docProps_().setProperty('rowcal_trigger_sheet', String(ss.getActiveSheet().getSheetId()));
+    docProps_().setProperty('rowcal_trigger_sheet', String(sheet.getSheetId()));
     ScriptApp.newTrigger('autoSync').timeBased().everyHours(1).create();
   }
-  return getState();
+  return getState(sheet.getSheetId());
 }
 function triggerSheet_(ss) {
   var id = docProps_().getProperty('rowcal_trigger_sheet');
@@ -304,25 +327,27 @@ function stripeHasActiveSubscription_(email) {
     return false;
   } catch (e) { return null; }
 }
-function activateLicense(email) {
+function activateLicense(email, sheetId) {
   email = String(email || '').trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { error: 'Enter the email you used at checkout.' };
   var ok = stripeHasActiveSubscription_(email);
   if (ok === null) return { error: 'Could not reach the licence server. Try again in a minute.' };
   if (!ok) return { error: 'No active Rowcal Pro subscription found for ' + email + '.' };
   userProps_().setProperties({ rowcal_license_email: email, rowcal_license_until: String(Date.now() + 86400000) });
-  return getState();
+  return getState(sheetId);
 }
-function removeLicense() { userProps_().deleteProperty('rowcal_license_email'); userProps_().deleteProperty('rowcal_license_until'); return getState(); }
+function removeLicense(sheetId) { userProps_().deleteProperty('rowcal_license_email'); userProps_().deleteProperty('rowcal_license_until'); return getState(sheetId); }
 
 // ---------- log ----------
 function log_(ss, action, sheetName, created, updated, deleted, skipped, errors) {
   var sh = ss.getSheetByName(LOG_SHEET);
   if (!sh) {
-    sh = ss.insertSheet(LOG_SHEET);
+    var active = ss.getActiveSheet(); // creating a tab makes it active; put the user back where they were
+    sh = ss.insertSheet(LOG_SHEET, ss.getNumSheets());
     sh.appendRow(['When', 'Action', 'Sheet', 'Created', 'Updated', 'Deleted', 'Skipped', 'Errors']);
     sh.getRange(1, 1, 1, 8).setFontWeight('bold');
     sh.hideSheet();
+    ss.setActiveSheet(active);
   }
   sh.appendRow([new Date(), action, sheetName, created, updated, deleted, skipped, errors.join('\n')]);
 }

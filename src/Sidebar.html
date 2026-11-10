@@ -15,7 +15,7 @@
   .check{display:flex;align-items:center;gap:8px;margin-top:8px;color:#202124;font-size:13px}
 </style></head><body>
 <h2>Rowcal</h2>
-<div class="muted">Rows in <b id="sheetName"></b> become calendar events. Nothing changes until you press Sync.</div>
+<div class="muted">Rows in <b id="sheetName"></b> become calendar events. Nothing changes until you press Sync. <a href="#" onclick="repin();return false;">Use the tab I'm on</a></div>
 
 <h3>1. Calendar</h3>
 <select id="calendarId"></select>
@@ -54,6 +54,7 @@ function status(msg, cls){ var el=document.getElementById('status'); el.classNam
 function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]}); }
 
 function render(state){
+  if (state.error) { status(state.error, 'err'); return; }
   S = state;
   document.getElementById('sheetName').textContent = S.sheetName;
   var cal = document.getElementById('calendarId');
@@ -73,12 +74,12 @@ function render(state){
   renderPlan();
 }
 function iso(d){ return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
-function save(patch){ run('saveSettings', patch).then(render).catch(function(e){status(e.message,'err')}); document.getElementById('syncBtn').disabled=true; }
+function save(patch){ run('saveSettings', patch, S.sheetId).then(render).catch(function(e){status(e.message,'err')}); document.getElementById('syncBtn').disabled=true; }
 
 function renderPlan(){
   var b = document.getElementById('planBox');
   if (S.pro) {
-    b.innerHTML = '<b>Rowcal Pro</b> · unlimited changes, hourly auto-sync<br><span class="small muted">'+esc(S.licenseEmail)+' · <a href="#" onclick="run(\'removeLicense\').then(render);return false;">sign out</a></span>' +
+    b.innerHTML = '<b>Rowcal Pro</b> · unlimited changes, hourly auto-sync<br><span class="small muted">'+esc(S.licenseEmail)+' · <a href="#" onclick="run(\'removeLicense\', S.sheetId).then(render);return false;">sign out</a></span>' +
       '<label class="check"><input type="checkbox" id="autoSync" '+(S.autoSync?'checked':'')+' onchange="toggleAuto(this.checked)"> Auto-sync this sheet every hour</label>';
   } else {
     var left = Math.max(0, S.freeLimit - S.usage);
@@ -88,12 +89,12 @@ function renderPlan(){
       '<label>Already paid? Enter your checkout email</label><div class="row"><input type="email" id="licEmail" placeholder="you@example.com"><button style="margin-top:2px;flex:0" onclick="activate()">Activate</button></div>';
   }
 }
-function toggleAuto(on){ run('setAutoSync', on).then(function(r){ if(r.error){status(r.error,'err');} render(r.error?S:r); }).catch(function(e){status(e.message,'err')}); }
-function activate(){ status('Checking…'); run('activateLicense', document.getElementById('licEmail').value).then(function(r){ if(r.error){status(r.error,'err');return;} status('Pro activated.','ok'); render(r); }).catch(function(e){status(e.message,'err')}); }
+function toggleAuto(on){ run('setAutoSync', on, S.sheetId).then(function(r){ if(r.error){status(r.error,'err');} render(r.error?S:r); }).catch(function(e){status(e.message,'err')}); }
+function activate(){ status('Checking…'); run('activateLicense', document.getElementById('licEmail').value, S.sheetId).then(function(r){ if(r.error){status(r.error,'err');return;} status('Pro activated.','ok'); render(r); }).catch(function(e){status(e.message,'err')}); }
 
 function doPreview(){
   status('Reading rows…'); document.getElementById('previewBtn').disabled=true;
-  run('preview').then(function(p){
+  run('preview', S.sheetId).then(function(p){
     document.getElementById('previewBtn').disabled=false;
     if(p.error){ status(p.error,'err'); document.getElementById('previewBox').innerHTML=''; return; }
     lastPlan = p; status('');
@@ -111,23 +112,24 @@ function doPreview(){
 }
 function doSync(){
   status('Syncing…'); document.getElementById('syncBtn').disabled=true;
-  run('sync', false).then(function(r){
+  run('sync', false, S.sheetId).then(function(r){
     if(r.error){ status(r.error,'err'); return; }
     var msg = 'Done: '+r.counts.create+' created, '+r.counts.update+' updated, '+r.deleted+' deleted.';
     if (r.errors.length) msg += ' '+r.errors.length+' error'+(r.errors.length>1?'s':'')+' (see run log).';
     status(msg, r.errors.length?'warn':'ok'); document.getElementById('previewBox').innerHTML='';
-    run('getState').then(render);
+    run('getState', S.sheetId).then(render);
   }).catch(function(e){ status(e.message,'err'); });
 }
 function doImport(){
   var f = document.getElementById('fromDate').value, t = document.getElementById('toDate').value;
   if(!f||!t){ status('Pick a date range.','err'); return; }
   status('Importing…');
-  run('importEvents', new Date(f+'T00:00:00').toISOString(), new Date(t+'T23:59:59').toISOString()).then(function(r){
+  run('importEvents', new Date(f+'T00:00:00').toISOString(), new Date(t+'T23:59:59').toISOString(), S.sheetId).then(function(r){
     if(r.error){ status(r.error,'err'); return; }
     status('Imported '+r.imported+' event'+(r.imported===1?'':'s')+(r.skipped?' ('+r.skipped+' already in the sheet or untitled)':'')+'.','ok');
-    run('getState').then(render);
+    run('getState', S.sheetId).then(render);
   }).catch(function(e){ status(e.message,'err'); });
 }
-run('getState').then(render).catch(function(e){ status(e.message,'err'); });
+function repin(){ status(''); document.getElementById('previewBox').innerHTML=''; document.getElementById('syncBtn').disabled=true; run('getState').then(render).catch(function(e){ status(e.message,'err'); }); }
+repin();
 </script></body></html>
