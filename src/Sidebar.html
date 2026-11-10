@@ -21,6 +21,7 @@
 
 <h3>1. Calendar</h3>
 <select id="calendarId"></select>
+<div class="small muted" id="tzNote" style="margin-top:4px"></div>
 
 <details id="colsBox">
   <summary><h3 style="display:inline">2. Columns</h3> <span class="small muted" id="colsSummary"></span></summary>
@@ -66,6 +67,7 @@ function render(state){
   var cal = document.getElementById('calendarId');
   cal.innerHTML = '<option value="">Choose a calendar…</option>' + S.calendars.map(function(c){ return '<option value="'+esc(c.id)+'"'+(c.id===S.settings.calendarId?' selected':'')+'>'+esc(c.name)+(c.primary?' (primary)':'')+'</option>'; }).join('');
   cal.onchange = function(){ save({calendarId: cal.value}); };
+  document.getElementById('tzNote').textContent = S.timeZone ? 'Times in your sheet are read as ' + S.timeZone.replace(/_/g,' ') + ', this calendar\'s time zone.' : '';
   var m = document.getElementById('mapping'); m.innerHTML='';
   S.fields.filter(function(f){return f!=='calendar'}).forEach(function(f){
     var sel = document.createElement('select'); sel.id='map_'+f;
@@ -75,8 +77,9 @@ function render(state){
   });
   var mapped = S.fields.filter(function(f){ return f!=='calendar' && S.map[f] >= 0; }).length;
   var needs = S.map.title < 0 || S.map.start < 0;
-  document.getElementById('colsSummary').textContent = needs ? 'pick a Title and a Start date column' : mapped + ' matched from your headers';
-  if (needs) document.getElementById('colsBox').open = true;
+  var empty = !S.headers.length || S.headers.every(function(h){ return /^Column \d+$/.test(h.name); });
+  document.getElementById('colsSummary').textContent = empty ? 'this tab is empty: add a header row, or import below' : needs ? 'pick a Title and a Start date column' : mapped + ' matched from your headers';
+  document.getElementById('colsBox').open = needs && !empty;
   var dm = document.getElementById('defaultMinutes'); dm.value = S.settings.defaultMinutes; dm.onchange=function(){ save({defaultMinutes: Number(dm.value)||60}); };
   var dr = document.getElementById('deleteRemoved'); dr.checked = !!S.settings.deleteRemoved; dr.onchange=function(){ save({deleteRemoved: dr.checked}); };
   var now = new Date(), first = new Date(now.getFullYear(), now.getMonth(), 1), last = new Date(now.getFullYear(), now.getMonth()+1, 0);

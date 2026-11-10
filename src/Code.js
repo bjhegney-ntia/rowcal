@@ -72,7 +72,7 @@ function getState(sheetId) {
     fields: ROWCAL.FIELDS,
     settings: settings,
     calendars: listCalendars_(),
-    timeZone: SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone(),
+    timeZone: settings.calendarId ? eventTz_(settings.calendarId, SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone()) : '',
     usage: usageThisMonth_(),
     freeLimit: FREE_MONTHLY_CHANGES,
     pro: lic.pro,
@@ -83,17 +83,27 @@ function getState(sheetId) {
 }
 
 function listCalendars_() {
-  var cache = CacheService.getUserCache(), hit = cache.get('rowcal_cals');
+  var cache = CacheService.getUserCache(), hit = cache.get('rowcal_cals2');
   if (hit) return JSON.parse(hit);
   var out = [], token;
   do {
     var res = Calendar.CalendarList.list({ minAccessRole: 'writer', pageToken: token, maxResults: 250 });
-    (res.items || []).forEach(function (c) { out.push({ id: c.id, name: c.summaryOverride || c.summary, primary: !!c.primary }); });
+    (res.items || []).forEach(function (c) { out.push({ id: c.id, name: c.summaryOverride || c.summary, primary: !!c.primary, timeZone: c.timeZone || '' }); });
     token = res.nextPageToken;
   } while (token);
   out.sort(function (a, b) { return (b.primary - a.primary) || a.name.localeCompare(b.name); });
-  cache.put('rowcal_cals', JSON.stringify(out), 600);
+  cache.put('rowcal_cals2', JSON.stringify(out), 600);
   return out;
+}
+
+/**
+ * The zone that sheet times mean. People expect "10:00" typed in a sheet to be 10:00 on their calendar,
+ * but a spreadsheet's own zone is a hidden setting that is often wrong (new sheets commonly default to
+ * Pacific). So times are read in the target calendar's zone, falling back to the spreadsheet's.
+ */
+function eventTz_(calendarId, ssTz) {
+  var cal = listCalendars_().filter(function (c) { return c.id === calendarId; })[0];
+  return (cal && cal.timeZone) || ssTz;
 }
 
 // ---------- preview & sync ----------
@@ -171,7 +181,7 @@ function sync(fromTrigger, sheetId) {
     var settings = getSettings_(sheet);
     var map = effectiveMap_(sheet, settings);
     if (map.title < 0 || map.start < 0 || !settings.calendarId) return { error: 'Set up the columns and calendar first.' };
-    var tz = ss.getSpreadsheetTimeZone();
+    var tz = eventTz_(settings.calendarId, ss.getSpreadsheetTimeZone());
     var rows = readRows_(sheet);
     var p = ROWCAL.plan(rows, map, settings, knownIds_(sheet));
     var lic = licenseState_();
@@ -221,14 +231,14 @@ function importEvents(fromIso, toIso, sheetId) {
   if (!sheet) return NO_SHEET;
   var settings = getSettings_(sheet);
   if (!settings.calendarId) return { error: 'Pick a calendar first.' };
-  var tz = ss.getSpreadsheetTimeZone();
+  var ssTz = ss.getSpreadsheetTimeZone(), calTz = eventTz_(settings.calendarId, ssTz);
   var headers = headers_(sheet);
-  var map;
+  var map, fresh = false;
   if (!headers.length || headers.every(function (h) { return h === ''; })) {
     headers = ['Title', 'Start', 'End', 'All day', 'Location', 'Description', ROWCAL.ID_HEADER];
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
     sheet.hideColumns(headers.length);
-    map = ROWCAL.autoMap(headers);
+    map = ROWCAL.autoMap(headers); fresh = true;
   } else {
     map = effectiveMap_(sheet, settings);
     if (map.title < 0 || map.start < 0) return { error: 'Map Title and Start columns first, or import into an empty sheet.' };
@@ -246,8 +256,8 @@ function importEvents(fromIso, toIso, sheetId) {
   items.forEach(function (ev) {
     if (!ev.summary || existing[ev.id]) return;
     var allDay = !!(ev.start && ev.start.date);
-    var start = allDay ? parseYmd_(ev.start.date) : toWall_(new Date(ev.start.dateTime), tz);
-    var end = allDay ? parseYmd_(ev.end.date) : toWall_(new Date(ev.end.dateTime), tz);
+    var start = allDay ? parseYmd_(ev.start.date) : toWall_(new Date(ev.start.dateTime), calTz);
+    var end = allDay ? parseYmd_(ev.end.date) : toWall_(new Date(ev.end.dateTime), calTz);
     var row = []; for (var i = 0; i < width; i++) row.push('');
     row[map.title] = ev.summary;
     row[map.start] = start;
@@ -258,7 +268,7 @@ function importEvents(fromIso, toIso, sheetId) {
     var d = ROWCAL.buildDesired(row, map, settings); // hash on wall-clock values, as a later sync will see them
     row[map.id] = d.skip ? ev.id : ROWCAL.formatIdCell(ev.id, ROWCAL.desiredHash(d));
     known.push(ev.id);
-    out.push(row.map(function (v) { return Object.prototype.toString.call(v) === '[object Date]' ? fromWall_(v, tz) : v; }));
+    out.push(row.map(function (v) { return Object.prototype.toString.call(v) === '[object Date]' ? fromWall_(v, ssTz) : v; }));
     formats.push(allDay ? 'm/d/yyyy' : 'm/d/yyyy h:mm am/pm');
   });
   if (out.length) {
@@ -267,6 +277,7 @@ function importEvents(fromIso, toIso, sheetId) {
     var fcol = formats.map(function (f) { return [f]; });
     sheet.getRange(first, map.start + 1, out.length, 1).setNumberFormats(fcol);
     if (map.end >= 0) sheet.getRange(first, map.end + 1, out.length, 1).setNumberFormats(fcol);
+    if (fresh) sheet.autoResizeColumns(1, headers.length - 1);
   }
   saveKnownIds_(sheet, known);
   log_(ss, 'import', sheet.getName(), out.length, 0, 0, items.length - out.length, []);

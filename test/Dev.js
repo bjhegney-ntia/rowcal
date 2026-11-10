@@ -11,13 +11,14 @@ function rowcalE2E_(out) {
   function S(label, r) { if (r.error) out.push('NOTE  ' + label + ' returned: ' + r.error); r.counts = r.counts || {}; r.errors = r.errors || [r.error]; return r; }
   function ok(name, cond, extra) { out.push((cond ? 'PASS  ' : 'FAIL  ') + name + (extra !== undefined ? '  [' + extra + ']' : '')); }
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  ss.setSpreadsheetTimeZone('America/Los_Angeles'); // deliberately not the script zone (UTC)
-  var tz = ss.getSpreadsheetTimeZone();
+  ss.setSpreadsheetTimeZone('America/Los_Angeles'); // the hidden wrong zone many new sheets carry
+  CacheService.getUserCache().remove('rowcal_cals2');
+  var tz = 'America/New_York'; // the test calendar's zone: sheet times must land here, not in the sheet's hidden zone
   var sheet = ss.getSheets()[0];
   ss.setActiveSheet(sheet);
-  CacheService.getUserCache().remove('rowcal_cals');
   var cal = listCalendars_().filter(function (c) { return c.name === 'Rowcal test'; })[0];
   ok('test calendar found', !!cal);
+  ok('calendar zone differs from the sheet zone (so the test means something)', !!cal && cal.timeZone === tz && ss.getSpreadsheetTimeZone() !== tz, cal && cal.timeZone + ' vs ' + ss.getSpreadsheetTimeZone());
   if (!cal) return finish_(ss, out);
   var calId = cal.id;
   function events() {
@@ -59,7 +60,7 @@ function rowcalE2E_(out) {
   ok('sync 1: no errors', s1.errors && s1.errors.length === 0, JSON.stringify(s1.errors || s1));
   ok('sync 1: 4 events on calendar', events().length === 4, events().length);
   var den = byTitle('Dentist')[0];
-  ok('timed event at sheet-local 9:30-10:15 on Nov 16', den && local(den) === '2026-11-16 09:30>10:15', den && local(den));
+  ok('9:30 typed in the sheet is 9:30 on the calendar, despite the sheet\'s hidden Pacific zone', den && local(den) === '2026-11-16 09:30>10:15', den && local(den));
   ok('location + description carried', den && den.location === 'Main St' && den.description === 'Bring insurance card');
   var off = byTitle('Team offsite')[0];
   ok('no time = all-day on the right date', off && off.start.date === '2026-11-17' && off.end.date === '2026-11-18', off && JSON.stringify(off.start));
@@ -174,7 +175,7 @@ function devTriggerResult() { Logger.log(PropertiesService.getScriptProperties()
 function devDemo() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   ss.setSpreadsheetTimeZone('America/New_York');
-  CacheService.getUserCache().remove('rowcal_cals');
+  CacheService.getUserCache().remove('rowcal_cals2');
   var cal = listCalendars_().filter(function (c) { return c.name === 'Rowcal test'; })[0];
   if (!cal) throw new Error('No calendar named "Rowcal test"');
   var items = Calendar.Events.list(cal.id, { timeMin: '2026-11-01T00:00:00Z', timeMax: '2026-12-31T00:00:00Z', singleEvents: true, maxResults: 500 }).items || [];
