@@ -65,8 +65,8 @@ page(4, 'Asks for only what it uses', 'Check the Permissions tab on any calendar
      '<div class="col" style="left:656px"><h2>Minutehand cannot</h2>'
      + row('no', '&#10005;', 'See your other spreadsheets or Drive files')
      + row('no', '&#10005;', 'Delete or share your calendars')
-     + row('no', '&#10005;', 'See your contacts, email address or profile') + '</div>'
-     '<div class="foot"><div>It also asks to show its sidebar, to run the hourly sync if you switch that on, and to contact Stripe only to check a Pro purchase. Nothing you sync leaves Google.</div></div>')
+     + row('no', '&#10005;', 'See your contacts') + '</div>'
+     '<div class="foot"><div>It also asks to show its sidebar, to run the hourly sync if you switch that on, and to contact Stripe only to check a Pro purchase. Google adds its standard email-and-profile line to every Marketplace app; Minutehand reads neither.</div></div>')
 duo(5, 'Import any date range, and keep it linked', 'Pull events into a sheet. Edit them there and the calendar follows.',
     'grid-import.jpg', 1166, 379, 'side-import.png',
     '<div class="big">8 events in, one click.</div><div class="line">Imported rows stay linked to their events, so a later edit in the sheet updates the calendar instead of making a copy.</div>')

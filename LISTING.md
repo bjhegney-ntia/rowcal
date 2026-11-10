@@ -38,7 +38,7 @@ Before you install any calendar add-on, open its Permissions tab. Minutehand ask
 - Create and change calendar events. It cannot delete or share your calendars, and it only touches the calendar you pick.
 - See the list of your calendars, to fill the picker and read that calendar's time zone.
 
-It does not ask for your contacts, your email address or your profile. It also asks to show its sidebar, to run the hourly sync if you switch that on, and to contact Stripe only to check a Pro purchase. Nothing you sync leaves Google.
+It does not ask for your contacts. Google adds its standard "see your email address and basic profile" lines to every Marketplace app; Minutehand never reads or stores either. It also asks to show its sidebar, to run the hourly sync if you switch that on, and to contact Stripe only to check a Pro purchase. Nothing you sync leaves Google.
 
 PLANS
 
@@ -68,10 +68,11 @@ Google Sheets™, Google Calendar™, Google Drive™ and Google Meet™ are tra
 - The Sheet and sidebar panels are real captures from a live run on 2026-11-10. Headlines, the teal callouts and the permissions slide are added graphics.
 
 **Why this copy (checked 2026-11-10 on the public Permissions tab of each listing):**
-- Sheets2GCal (8M+ installs) asks to see, edit, create and delete all your spreadsheets, plus your email address and profile.
-- Sheet.Cal (25K+) asks to see, edit, share and permanently delete all your calendars, to download your contacts, plus email and profile. It already sells a preview, no duplicates and a log, so those alone are not a wedge against it.
-- Sheet2Cal (27K+) asks to see, edit, share and permanently delete all your calendars, plus email and profile.
+- Sheets2GCal (8M+ installs) asks to see, edit, create and delete all your spreadsheets.
+- Sheet.Cal (25K+) asks to see, edit, share and permanently delete all your calendars, to download your contacts. It already sells a preview, no duplicates and a log, so those alone are not a wedge against it.
+- Sheet2Cal (27K+) asks to see, edit, share and permanently delete all your calendars.
 - Minutehand asks for none of those. The copy never names a rival; it tells the reader where to look.
+- Correction, 2026-11-10: every listing, ours included, also shows "see your email address" and "see your personal info". The Marketplace adds those two by default and they cannot be removed (seen on the App Configuration form). An earlier draft counted them against rivals and claimed Minutehand did not ask for them; both were wrong and are fixed.
 - Not checked: whether rivals place times correctly. The copy therefore claims only what Minutehand does.
 
 **Name check (2026-11-10):** the first working name, Rowcal, was dropped. "rowCall" is a Sheets add-on with 391K+ installs, and "Calrows" is a direct rival. A Marketplace search for "Minutehand" returns nothing, and a web search found no product by that name. No formal trademark search has been run.
