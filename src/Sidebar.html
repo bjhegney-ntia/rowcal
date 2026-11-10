@@ -36,7 +36,7 @@
 <h3>Import from calendar</h3>
 <div class="row">
   <div><label>From</label><input type="date" id="fromDate"></div>
-  <div><label>To</label><label></label><input type="date" id="toDate"></div>
+  <div><label>To</label><input type="date" id="toDate"></div>
 </div>
 <button onclick="doImport()">Import events into this sheet</button>
 <div class="small muted">Imported rows are tracked, so editing them later updates the event.</div>
@@ -79,7 +79,7 @@ function renderPlan(){
   var b = document.getElementById('planBox');
   if (S.pro) {
     b.innerHTML = '<b>Rowcal Pro</b> · unlimited changes, hourly auto-sync<br><span class="small muted">'+esc(S.licenseEmail)+' · <a href="#" onclick="run(\'removeLicense\').then(render);return false;">sign out</a></span>' +
-      '<label class="check"><input type="checkbox" id="autoSync" '+(S.autoSync?'checked':'')+' onchange="toggleAuto(this.checked)"> Auto-sync this sheet every hour and on edits</label>';
+      '<label class="check"><input type="checkbox" id="autoSync" '+(S.autoSync?'checked':'')+' onchange="toggleAuto(this.checked)"> Auto-sync this sheet every hour</label>';
   } else {
     var left = Math.max(0, S.freeLimit - S.usage);
     b.innerHTML = '<b>Free plan</b> · <span class="'+(left<10?'warn':'')+'">'+left+' of '+S.freeLimit+' event changes left this month</span>' +

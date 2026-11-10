@@ -70,6 +70,8 @@ function getState() {
 }
 
 function listCalendars_() {
+  var cache = CacheService.getUserCache(), hit = cache.get('rowcal_cals');
+  if (hit) return JSON.parse(hit);
   var out = [], token;
   do {
     var res = Calendar.CalendarList.list({ minAccessRole: 'writer', pageToken: token, maxResults: 250 });
@@ -77,6 +79,7 @@ function listCalendars_() {
     token = res.nextPageToken;
   } while (token);
   out.sort(function (a, b) { return (b.primary - a.primary) || a.name.localeCompare(b.name); });
+  cache.put('rowcal_cals', JSON.stringify(out), 600);
   return out;
 }
 
@@ -242,7 +245,6 @@ function setAutoSync(on) {
   if (on) {
     if (!licenseState_().pro) return { error: 'Hourly auto-sync is a Pro feature.' };
     docProps_().setProperty('rowcal_trigger_sheet', String(ss.getActiveSheet().getSheetId()));
-    ScriptApp.newTrigger('autoSync').forSpreadsheet(ss).onChange().create();
     ScriptApp.newTrigger('autoSync').timeBased().everyHours(1).create();
   }
   return getState();
