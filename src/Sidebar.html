@@ -12,6 +12,8 @@
   table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px} td{padding:3px 4px;border-top:1px solid #e8eaed;vertical-align:top}
   .muted{color:#5f6368;font-size:12px} .small{font-size:11px} a{color:#1a73e8}
   #status{min-height:18px;margin-top:8px}
+  details{margin-top:18px} summary{cursor:pointer} summary h3{margin:0}
+  .scroll{max-height:230px;overflow:auto;margin-top:6px}
   .check{display:flex;align-items:center;gap:8px;margin-top:8px;color:#202124;font-size:13px}
 </style></head><body>
 <h2>Rowcal</h2>
@@ -20,18 +22,22 @@
 <h3>1. Calendar</h3>
 <select id="calendarId"></select>
 
-<h3>2. Columns</h3>
-<div id="mapping"></div>
-<div class="row">
-  <div><label>If no end: event lasts (min)</label><input type="number" id="defaultMinutes" min="5" step="5"></div>
-</div>
-<label class="check"><input type="checkbox" id="deleteRemoved"> Delete events whose rows were removed</label>
+<details id="colsBox">
+  <summary><h3 style="display:inline">2. Columns</h3> <span class="small muted" id="colsSummary"></span></summary>
+  <div id="mapping"></div>
+  <div class="row">
+    <div><label>If no end: event lasts (min)</label><input type="number" id="defaultMinutes" min="5" step="5"></div>
+  </div>
+  <label class="check"><input type="checkbox" id="deleteRemoved"> Delete events whose rows were removed</label>
+</details>
 
 <h3>3. Preview, then sync</h3>
-<button class="primary" id="previewBtn" onclick="doPreview()">Preview changes</button>
-<div id="previewBox"></div>
-<button id="syncBtn" onclick="doSync()" disabled>Sync to calendar</button>
+<div class="row">
+  <button class="primary" id="previewBtn" onclick="doPreview()">Preview changes</button>
+  <button id="syncBtn" onclick="doSync()" disabled>Sync to calendar</button>
+</div>
 <div id="status"></div>
+<div id="previewBox"></div>
 
 <h3>Import from calendar</h3>
 <div class="row">
@@ -67,6 +73,10 @@ function render(state){
     sel.onchange = function(){ var o = S.settings.mapOverrides||{}; o[f]=Number(sel.value); save({mapOverrides:o}); };
     var lab = document.createElement('label'); lab.textContent = LABELS[f]; lab.appendChild(sel); m.appendChild(lab);
   });
+  var mapped = S.fields.filter(function(f){ return f!=='calendar' && S.map[f] >= 0; }).length;
+  var needs = S.map.title < 0 || S.map.start < 0;
+  document.getElementById('colsSummary').textContent = needs ? 'pick a Title and a Start date column' : mapped + ' matched from your headers';
+  if (needs) document.getElementById('colsBox').open = true;
   var dm = document.getElementById('defaultMinutes'); dm.value = S.settings.defaultMinutes; dm.onchange=function(){ save({defaultMinutes: Number(dm.value)||60}); };
   var dr = document.getElementById('deleteRemoved'); dr.checked = !!S.settings.deleteRemoved; dr.onchange=function(){ save({deleteRemoved: dr.checked}); };
   var now = new Date(), first = new Date(now.getFullYear(), now.getMonth(), 1), last = new Date(now.getFullYear(), now.getMonth()+1, 0);
@@ -100,14 +110,14 @@ function doPreview(){
     lastPlan = p; status('');
     var c = p.counts, html = '<div class="card"><div class="counts"><span class="ok">+'+c.create+' create</span><span>'+c.update+' update</span><span>'+c.delete+' delete</span><span class="muted">'+c.unchanged+' unchanged</span><span class="muted">'+c.skip+' skipped</span></div>';
     if (p.sample.length) {
-      html += '<table>' + p.sample.map(function(s){ return '<tr><td class="muted">'+s.row+'</td><td>'+esc(s.action)+(s.reason?' <span class="warn">('+esc(s.reason)+')</span>':'')+'</td><td>'+esc(s.title)+'</td><td class="muted">'+esc(s.when)+'</td></tr>'; }).join('') + '</table>';
+      html += '<div class="scroll"><table>' + p.sample.map(function(s){ return '<tr><td class="muted">'+s.row+'</td><td>'+esc(s.action)+(s.reason?' <span class="warn">('+esc(s.reason)+')</span>':'')+'</td><td>'+esc(s.title)+'</td><td class="muted">'+esc(s.when)+'</td></tr>'; }).join('') + '</table></div>';
       if (c.changes + c.skip > p.sample.length) html += '<div class="small muted">Showing first '+p.sample.length+'.</div>';
     }
     if (!p.lic.pro && p.usage + c.changes > p.freeLimit) html += '<div class="warn" style="margin-top:6px">Needs '+c.changes+' changes; '+(p.freeLimit-p.usage)+' left on the free plan this month.</div>';
     html += '</div>';
     document.getElementById('previewBox').innerHTML = html;
     document.getElementById('syncBtn').disabled = c.changes === 0;
-    document.getElementById('syncBtn').textContent = c.changes ? 'Sync '+c.changes+' change'+(c.changes===1?'':'s')+' to calendar' : 'Nothing to sync';
+    document.getElementById('syncBtn').textContent = c.changes ? 'Sync '+c.changes+' change'+(c.changes===1?'':'s') : 'Nothing to sync';
   }).catch(function(e){ document.getElementById('previewBtn').disabled=false; status(e.message,'err'); });
 }
 function doSync(){
@@ -116,7 +126,7 @@ function doSync(){
     if(r.error){ status(r.error,'err'); return; }
     var msg = 'Done: '+r.counts.create+' created, '+r.counts.update+' updated, '+r.deleted+' deleted.';
     if (r.errors.length) msg += ' '+r.errors.length+' error'+(r.errors.length>1?'s':'')+' (see run log).';
-    status(msg, r.errors.length?'warn':'ok'); document.getElementById('previewBox').innerHTML='';
+    status(msg, r.errors.length?'warn':'ok'); document.getElementById('previewBox').innerHTML=''; document.getElementById('syncBtn').textContent='Sync to calendar';
     run('getState', S.sheetId).then(render);
   }).catch(function(e){ status(e.message,'err'); });
 }

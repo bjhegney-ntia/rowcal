@@ -169,3 +169,38 @@ function devTriggerTick() {
   ScriptApp.getProjectTriggers().forEach(function (t) { ScriptApp.deleteTrigger(t); });
 }
 function devTriggerResult() { Logger.log(PropertiesService.getScriptProperties().getProperty('dev_trigger_result') || 'no result yet'); }
+
+/** Resets the test Sheet to a clean demo (nothing synced yet) for the sidebar walk-through and screenshots. */
+function devDemo() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  ss.setSpreadsheetTimeZone('America/New_York');
+  CacheService.getUserCache().remove('rowcal_cals');
+  var cal = listCalendars_().filter(function (c) { return c.name === 'Rowcal test'; })[0];
+  if (!cal) throw new Error('No calendar named "Rowcal test"');
+  var items = Calendar.Events.list(cal.id, { timeMin: '2026-11-01T00:00:00Z', timeMax: '2026-12-31T00:00:00Z', singleEvents: true, maxResults: 500 }).items || [];
+  items.forEach(function (e) { Calendar.Events.remove(cal.id, e.id); });
+  ScriptApp.getProjectTriggers().forEach(function (t) { ScriptApp.deleteTrigger(t); });
+  docProps_().deleteAllProperties();
+  userProps_().deleteProperty('rowcal_usage_' + ROWCAL.monthKey());
+  var sheet = ss.getSheets()[0];
+  ss.setActiveSheet(sheet);
+  ss.getSheets().forEach(function (s) { if (s.getSheetId() !== sheet.getSheetId()) ss.deleteSheet(s); });
+  sheet.clear(); sheet.showColumns(1, sheet.getMaxColumns()); sheet.setName('Launch plan');
+  var rows = [
+    ['Event', 'Date', 'Start time', 'End time', 'Where', 'Notes'],
+    ['Kickoff with design', '11/16/2026', '10:00 AM', '10:45 AM', 'Zoom', 'Agree the launch checklist'],
+    ['Pricing page review', '11/17/2026', '2:00 PM', '3:00 PM', 'Room 4', 'Bring competitor screenshots'],
+    ['Customer interview: Dana', '11/18/2026', '11:30 AM', '12:00 PM', 'Phone', ''],
+    ['Press embargo lifts', '11/19/2026', '', '', '', 'All day'],
+    ['Webinar dry run', '11/19/2026', '4:00 PM', '5:00 PM', 'Zoom', 'Slides final by noon'],
+    ['Launch day', '11/23/2026', '', '', '', ''],
+    ['Launch webinar', '11/23/2026', '1:00 PM', '2:00 PM', 'Zoom', '200 registered'],
+    ['Retro', '11/30/2026', '9:30 AM', '10:15 AM', 'Room 4', 'What to keep, what to drop'],
+    ['Follow-up emails (date TBD)', '', '', '', '', 'No date yet, so Rowcal skips it']
+  ];
+  sheet.getRange(1, 1, rows.length, 6).setValues(rows);
+  sheet.getRange(1, 1, 1, 6).setFontWeight('bold').setBackground('#f1f3f4');
+  sheet.setFrozenRows(1);
+  sheet.autoResizeColumns(1, 6);
+  SpreadsheetApp.flush();
+}
