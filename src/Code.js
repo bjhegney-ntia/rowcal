@@ -357,6 +357,8 @@ function log_(ss, action, sheetName, created, updated, deleted, skipped, errors)
     sh = ss.insertSheet(LOG_SHEET, ss.getNumSheets());
     sh.appendRow(['When', 'Action', 'Sheet', 'Created', 'Updated', 'Deleted', 'Skipped', 'Errors']);
     sh.getRange(1, 1, 1, 8).setFontWeight('bold');
+    sh.setColumnWidth(1, 150); sh.setColumnWidth(8, 320);
+    sh.getRange('A:A').setNumberFormat('m/d/yyyy h:mm am/pm');
     sh.hideSheet();
     ss.setActiveSheet(active);
   }
