@@ -335,7 +335,8 @@ function stripeHasPurchase_(email) {
       '&' + encodeURIComponent('customer_details[email]') + '=' + encodeURIComponent(email);
     var r = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + key }, muteHttpExceptions: true });
     if (r.getResponseCode() !== 200) return null;
-    return (JSON.parse(r.getContentText()).data || []).some(function (s) { return s.payment_status === 'paid'; });
+    // 'no_payment_required' is a checkout completed with a 100%-off code: a gifted licence.
+    return (JSON.parse(r.getContentText()).data || []).some(function (s) { return s.payment_status === 'paid' || s.payment_status === 'no_payment_required'; });
   } catch (e) { return null; }
 }
 function activateLicense(email, sheetId) {
