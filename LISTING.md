@@ -20,7 +20,7 @@ Rowcal turns a Google Sheet into Google Calendar events, and back. Unlike most s
 
 **Minimal permissions.** Rowcal sees only the spreadsheet it is open in and the events on the calendar you pick. It never asks for all your spreadsheets or all your Drive, and nothing you sync leaves Google.
 
-Questions or a column layout that doesn't map? hello@rowcal.app
+Questions or a column layout that doesn't map? https://bjhegney-ntia.github.io/rowcal
 
 **Category:** Productivity → Calendars & Scheduling (Sheets)
 **Pricing text:** Free of charge with paid features
@@ -34,4 +34,4 @@ Questions or a column layout that doesn't map? hello@rowcal.app
 4. Run log sheet
 5. Free-plan counter and Pro card
 
-**Support URL:** https://rowcal.app  ·  **Privacy:** https://rowcal.app/privacy  ·  **Terms:** https://rowcal.app/terms
+**Support URL:** https://bjhegney-ntia.github.io/rowcal  ·  **Privacy:** https://bjhegney-ntia.github.io/rowcal/privacy.html  ·  **Terms:** https://bjhegney-ntia.github.io/rowcal/terms.html

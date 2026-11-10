@@ -4,7 +4,7 @@ Google Sheets add-on: rows → Calendar events with a preview first. Apps Script
 
 - `src/` — the Apps Script project (`clasp push` target). `Lib.js` is pure logic shared with tests.
 - `test/lib.test.js` — `node test/lib.test.js`
-- `site/` — privacy and terms pages (static; GitHub Pages or any host)
+- `docs/` — landing, privacy and terms pages, served by GitHub Pages
 - `LISTING.md` — Marketplace copy and screenshot plan
 
 ## Deploy (one-time setup, needs Brian's Google login)
