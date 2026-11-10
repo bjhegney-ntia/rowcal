@@ -84,10 +84,26 @@ function listCalendars_() {
 }
 
 // ---------- preview & sync ----------
+/*
+ * Time zones. The script runs in UTC; spreadsheets can be in any zone. Cell dates are converted to
+ * "wall-clock" Dates (script-local fields equal what the user sees in the sheet), all logic runs on
+ * those, and events are sent as local time strings labelled with the spreadsheet's zone.
+ */
+var WALL_FMT = "yyyy-MM-dd'T'HH:mm:ss";
+function scriptTz_() { return Session.getScriptTimeZone(); }
+function toWall_(v, ssTz) {
+  if (Object.prototype.toString.call(v) !== '[object Date]' || isNaN(v.getTime())) return v;
+  var m = Utilities.formatDate(v, ssTz, WALL_FMT).match(/^(\d+)-(\d+)-(\d+)T(\d+):(\d+):(\d+)$/);
+  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+}
+function fromWall_(d, ssTz) { return Utilities.parseDate(Utilities.formatDate(d, scriptTz_(), WALL_FMT), ssTz, WALL_FMT); }
 function readRows_(sheet) {
   var lastRow = sheet.getLastRow(), lastCol = sheet.getLastColumn();
   if (lastRow < 2 || !lastCol) return [];
-  return sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  var tz = sheet.getParent().getSpreadsheetTimeZone();
+  return sheet.getRange(2, 1, lastRow - 1, lastCol).getValues().map(function (row) {
+    return row.map(function (v) { return toWall_(v, tz); });
+  });
 }
 
 function preview() {
@@ -97,26 +113,27 @@ function preview() {
   if (map.title < 0 || map.start < 0) return { error: 'Map at least a Title column and a Start date column.' };
   if (!settings.calendarId) return { error: 'Pick a calendar first.' };
   var p = ROWCAL.plan(readRows_(sheet), map, settings, knownIds_(sheet));
-  var tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
   var sample = p.items.filter(function (i) { return i.action !== 'unchanged'; }).slice(0, 40).map(function (i) {
-    return { row: i.row, action: i.action, reason: i.reason || '', title: i.desired ? i.desired.summary : '', when: i.desired ? fmtWhen_(i.desired, tz) : '' };
+    return { row: i.row, action: i.action, reason: i.reason || '', title: i.desired ? i.desired.summary : '', when: i.desired ? fmtWhen_(i.desired) : '' };
   });
   return { counts: p.counts, sample: sample, lic: licenseState_(), usage: usageThisMonth_(), freeLimit: FREE_MONTHLY_CHANGES };
 }
 
-function fmtWhen_(d, tz) {
+function fmtWhen_(d) {
+  var tz = scriptTz_();
   return d.allDay ? Utilities.formatDate(d.start, tz, 'EEE MMM d') + ' (all day)'
     : Utilities.formatDate(d.start, tz, 'EEE MMM d, h:mm a') + ' – ' + Utilities.formatDate(d.end, tz, 'h:mm a');
 }
 
-function toEventResource_(d, tz) {
+function toEventResource_(d, ssTz) {
   var r = { summary: d.summary, description: d.description, location: d.location };
+  var tz = scriptTz_();
   if (d.allDay) {
     r.start = { date: Utilities.formatDate(d.start, tz, 'yyyy-MM-dd') };
     r.end = { date: Utilities.formatDate(d.end, tz, 'yyyy-MM-dd') };
   } else {
-    r.start = { dateTime: Utilities.formatDate(d.start, tz, "yyyy-MM-dd'T'HH:mm:ss"), timeZone: tz };
-    r.end = { dateTime: Utilities.formatDate(d.end, tz, "yyyy-MM-dd'T'HH:mm:ss"), timeZone: tz };
+    r.start = { dateTime: Utilities.formatDate(d.start, tz, WALL_FMT), timeZone: ssTz };
+    r.end = { dateTime: Utilities.formatDate(d.end, tz, WALL_FMT), timeZone: ssTz };
   }
   return r;
 }
@@ -150,9 +167,9 @@ function sync(fromTrigger) {
     }
     var idCol = ensureIdColumn_(sheet, map) + 1;
     var calId = settings.calendarId;
-    var errors = [], known = {};
-    knownIds_(sheet).forEach(function (id) { known[id] = true; });
-    var idWrites = [];
+    // known = every event this sheet is responsible for after this run. Rows that vanish while
+    // "delete removed" is off are forgotten, so switching it on later never deletes old events.
+    var errors = [], known = {}, idWrites = [], failedRows = 0;
     p.items.forEach(function (it) {
       if (it.action === 'unchanged' || it.action === 'skip') { if (it.eventId) known[it.eventId] = true; return; }
       var res = toEventResource_(it.desired, tz);
@@ -160,24 +177,24 @@ function sync(fromTrigger) {
         var ev;
         if (it.action === 'create') ev = Calendar.Events.insert(res, calId);
         else {
-          try { ev = Calendar.Events.patch(res, calId, it.eventId); }
-          catch (e) { // event deleted in Calendar: recreate rather than fail
-            if (String(e).indexOf('Not Found') >= 0 || String(e).indexOf('404') >= 0 || String(e).indexOf('deleted') >= 0) { delete known[it.eventId]; ev = Calendar.Events.insert(res, calId); }
+          try { ev = Calendar.Events.patch(res, calId, it.eventId); if (ev.status === 'cancelled') throw new Error('Not Found (cancelled)'); }
+          catch (e) { // event was deleted in Calendar: recreate rather than fail
+            if (/Not Found|404|410|deleted/i.test(String(e))) ev = Calendar.Events.insert(res, calId);
             else throw e;
           }
         }
         known[ev.id] = true;
         idWrites.push({ row: it.row, value: ROWCAL.formatIdCell(ev.id, it.hash) });
-      } catch (e) { errors.push('Row ' + it.row + ': ' + e.message); }
+      } catch (e) { failedRows++; if (it.eventId) known[it.eventId] = true; errors.push('Row ' + it.row + ': ' + e.message); }
     });
     var deleted = 0;
     p.deletes.forEach(function (id) {
-      try { Calendar.Events.remove(calId, id); deleted++; } catch (e) { if (String(e).indexOf('Not Found') < 0 && String(e).indexOf('410') < 0) errors.push('Delete ' + id + ': ' + e.message); }
-      delete known[id];
+      try { Calendar.Events.remove(calId, id); deleted++; }
+      catch (e) { if (!/Not Found|404|410|deleted/i.test(String(e))) { known[id] = true; errors.push('Delete ' + id + ': ' + e.message); } }
     });
     idWrites.forEach(function (w) { sheet.getRange(w.row, idCol).setValue(w.value); });
     saveKnownIds_(sheet, Object.keys(known));
-    var changes = p.counts.create + p.counts.update + deleted - errors.filter(function (x) { return x.indexOf('Row') === 0; }).length;
+    var changes = p.counts.create + p.counts.update + deleted - failedRows;
     addUsage_(changes);
     log_(ss, fromTrigger ? 'auto-sync' : 'sync', sheet.getName(), p.counts.create, p.counts.update, deleted, p.counts.skip, errors);
     return { counts: p.counts, deleted: deleted, errors: errors, usage: usageThisMonth_() };
@@ -214,19 +231,19 @@ function importEvents(fromIso, toIso) {
   items.forEach(function (ev) {
     if (!ev.summary || existing[ev.id]) return;
     var allDay = !!(ev.start && ev.start.date);
-    var start = allDay ? parseYmd_(ev.start.date) : new Date(ev.start.dateTime);
-    var end = allDay ? parseYmd_(ev.end.date) : new Date(ev.end.dateTime);
+    var start = allDay ? parseYmd_(ev.start.date) : toWall_(new Date(ev.start.dateTime), tz);
+    var end = allDay ? parseYmd_(ev.end.date) : toWall_(new Date(ev.end.dateTime), tz);
     var row = []; for (var i = 0; i < width; i++) row.push('');
     row[map.title] = ev.summary;
     row[map.start] = start;
-    if (map.end >= 0) row[map.end] = allDay ? new Date(end.getTime() - 86400000) : end;
+    if (map.end >= 0) row[map.end] = allDay ? new Date(end.getFullYear(), end.getMonth(), end.getDate() - 1) : end;
     if (map.allDay >= 0) row[map.allDay] = allDay;
     if (map.location >= 0) row[map.location] = ev.location || '';
     if (map.description >= 0) row[map.description] = ev.description || '';
-    var d = ROWCAL.buildDesired(row, map, settings);
+    var d = ROWCAL.buildDesired(row, map, settings); // hash on wall-clock values, as a later sync will see them
     row[map.id] = d.skip ? ev.id : ROWCAL.formatIdCell(ev.id, ROWCAL.desiredHash(d));
     known.push(ev.id);
-    out.push(row);
+    out.push(row.map(function (v) { return Object.prototype.toString.call(v) === '[object Date]' ? fromWall_(v, tz) : v; }));
   });
   if (out.length) sheet.getRange(sheet.getLastRow() + 1, 1, out.length, width).setValues(out);
   saveKnownIds_(sheet, known);
