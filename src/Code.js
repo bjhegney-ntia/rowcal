@@ -1,0 +1,314 @@
+/** Rowcal: Sheets → Calendar sync with a preview first. Apps Script side. */
+
+var FREE_MONTHLY_CHANGES = 50;
+var LOG_SHEET = 'Rowcal Log';
+
+function onInstall(e) { onOpen(e); }
+function onOpen(e) {
+  SpreadsheetApp.getUi().createAddonMenu().addItem('Open Rowcal', 'showSidebar').addToUi();
+}
+function showSidebar() {
+  var html = HtmlService.createHtmlOutputFromFile('Sidebar').setTitle('Rowcal');
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+// ---------- settings ----------
+function sheetKey_(sheet) { return 'rowcal_' + sheet.getSheetId(); }
+function docProps_() { return PropertiesService.getDocumentProperties(); }
+function getSettings_(sheet) {
+  var raw = docProps_().getProperty(sheetKey_(sheet) + '_settings');
+  var s = raw ? JSON.parse(raw) : {};
+  if (!s.defaultMinutes) s.defaultMinutes = 60;
+  if (s.deleteRemoved === undefined) s.deleteRemoved = true;
+  return s;
+}
+function saveSettings(settings) {
+  var sheet = SpreadsheetApp.getActiveSheet();
+  var cur = getSettings_(sheet);
+  Object.keys(settings).forEach(function (k) { cur[k] = settings[k]; });
+  docProps_().setProperty(sheetKey_(sheet) + '_settings', JSON.stringify(cur));
+  return getState();
+}
+function knownIds_(sheet) {
+  var raw = docProps_().getProperty(sheetKey_(sheet) + '_known');
+  return raw ? JSON.parse(raw) : [];
+}
+function saveKnownIds_(sheet, ids) { docProps_().setProperty(sheetKey_(sheet) + '_known', JSON.stringify(ids)); }
+
+function headers_(sheet) {
+  var lastCol = sheet.getLastColumn();
+  return lastCol ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+}
+function effectiveMap_(sheet, settings) {
+  var map = ROWCAL.autoMap(headers_(sheet));
+  var o = settings.mapOverrides || {};
+  Object.keys(o).forEach(function (f) { if (o[f] !== undefined && o[f] !== null) map[f] = Number(o[f]); });
+  return map;
+}
+
+/** Everything the sidebar needs to render. */
+function getState() {
+  var sheet = SpreadsheetApp.getActiveSheet();
+  var settings = getSettings_(sheet);
+  var headers = headers_(sheet);
+  var lic = licenseState_();
+  return {
+    sheetName: sheet.getName(),
+    headers: headers.map(function (h, i) { return { i: i, name: String(h || ('Column ' + (i + 1))) }; }),
+    map: effectiveMap_(sheet, settings),
+    fields: ROWCAL.FIELDS,
+    settings: settings,
+    calendars: listCalendars_(),
+    timeZone: SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone(),
+    usage: usageThisMonth_(),
+    freeLimit: FREE_MONTHLY_CHANGES,
+    pro: lic.pro,
+    licenseEmail: lic.email || '',
+    upgradeUrl: PropertiesService.getScriptProperties().getProperty('UPGRADE_URL') || '',
+    autoSync: hasTrigger_()
+  };
+}
+
+function listCalendars_() {
+  var out = [], token;
+  do {
+    var res = Calendar.CalendarList.list({ minAccessRole: 'writer', pageToken: token, maxResults: 250 });
+    (res.items || []).forEach(function (c) { out.push({ id: c.id, name: c.summaryOverride || c.summary, primary: !!c.primary }); });
+    token = res.nextPageToken;
+  } while (token);
+  out.sort(function (a, b) { return (b.primary - a.primary) || a.name.localeCompare(b.name); });
+  return out;
+}
+
+// ---------- preview & sync ----------
+function readRows_(sheet) {
+  var lastRow = sheet.getLastRow(), lastCol = sheet.getLastColumn();
+  if (lastRow < 2 || !lastCol) return [];
+  return sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+}
+
+function preview() {
+  var sheet = SpreadsheetApp.getActiveSheet();
+  var settings = getSettings_(sheet);
+  var map = effectiveMap_(sheet, settings);
+  if (map.title < 0 || map.start < 0) return { error: 'Map at least a Title column and a Start date column.' };
+  if (!settings.calendarId) return { error: 'Pick a calendar first.' };
+  var p = ROWCAL.plan(readRows_(sheet), map, settings, knownIds_(sheet));
+  var tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+  var sample = p.items.filter(function (i) { return i.action !== 'unchanged'; }).slice(0, 40).map(function (i) {
+    return { row: i.row, action: i.action, reason: i.reason || '', title: i.desired ? i.desired.summary : '', when: i.desired ? fmtWhen_(i.desired, tz) : '' };
+  });
+  return { counts: p.counts, sample: sample, lic: licenseState_(), usage: usageThisMonth_(), freeLimit: FREE_MONTHLY_CHANGES };
+}
+
+function fmtWhen_(d, tz) {
+  return d.allDay ? Utilities.formatDate(d.start, tz, 'EEE MMM d') + ' (all day)'
+    : Utilities.formatDate(d.start, tz, 'EEE MMM d, h:mm a') + ' – ' + Utilities.formatDate(d.end, tz, 'h:mm a');
+}
+
+function toEventResource_(d, tz) {
+  var r = { summary: d.summary, description: d.description, location: d.location };
+  if (d.allDay) {
+    r.start = { date: Utilities.formatDate(d.start, tz, 'yyyy-MM-dd') };
+    r.end = { date: Utilities.formatDate(d.end, tz, 'yyyy-MM-dd') };
+  } else {
+    r.start = { dateTime: Utilities.formatDate(d.start, tz, "yyyy-MM-dd'T'HH:mm:ss"), timeZone: tz };
+    r.end = { dateTime: Utilities.formatDate(d.end, tz, "yyyy-MM-dd'T'HH:mm:ss"), timeZone: tz };
+  }
+  return r;
+}
+
+function ensureIdColumn_(sheet, map) {
+  if (map.id >= 0) return map.id;
+  var col = Math.max(sheet.getLastColumn(), 1) + 1;
+  sheet.getRange(1, col).setValue(ROWCAL.ID_HEADER).setFontColor('#999999');
+  sheet.hideColumns(col);
+  return col - 1;
+}
+
+/** Apply the plan. Called by the sidebar after preview, and by the hourly trigger. */
+function sync(fromTrigger) {
+  var lock = LockService.getDocumentLock();
+  if (!lock.tryLock(5000)) return { error: 'Another sync is running. Try again in a moment.' };
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = fromTrigger ? triggerSheet_(ss) : ss.getActiveSheet();
+    if (!sheet) return { error: 'The sheet set up for auto-sync no longer exists.' };
+    var settings = getSettings_(sheet);
+    var map = effectiveMap_(sheet, settings);
+    if (map.title < 0 || map.start < 0 || !settings.calendarId) return { error: 'Set up the columns and calendar first.' };
+    var tz = ss.getSpreadsheetTimeZone();
+    var rows = readRows_(sheet);
+    var p = ROWCAL.plan(rows, map, settings, knownIds_(sheet));
+    var lic = licenseState_();
+    var used = usageThisMonth_();
+    if (!lic.pro && used + p.counts.changes > FREE_MONTHLY_CHANGES) {
+      return { error: 'This sync needs ' + p.counts.changes + ' event changes. The free plan has ' + Math.max(0, FREE_MONTHLY_CHANGES - used) + ' left this month. Nothing was changed.', limit: true };
+    }
+    var idCol = ensureIdColumn_(sheet, map) + 1;
+    var calId = settings.calendarId;
+    var errors = [], known = {};
+    knownIds_(sheet).forEach(function (id) { known[id] = true; });
+    var idWrites = [];
+    p.items.forEach(function (it) {
+      if (it.action === 'unchanged' || it.action === 'skip') { if (it.eventId) known[it.eventId] = true; return; }
+      var res = toEventResource_(it.desired, tz);
+      try {
+        var ev;
+        if (it.action === 'create') ev = Calendar.Events.insert(res, calId);
+        else {
+          try { ev = Calendar.Events.patch(res, calId, it.eventId); }
+          catch (e) { // event deleted in Calendar: recreate rather than fail
+            if (String(e).indexOf('Not Found') >= 0 || String(e).indexOf('404') >= 0 || String(e).indexOf('deleted') >= 0) { delete known[it.eventId]; ev = Calendar.Events.insert(res, calId); }
+            else throw e;
+          }
+        }
+        known[ev.id] = true;
+        idWrites.push({ row: it.row, value: ROWCAL.formatIdCell(ev.id, it.hash) });
+      } catch (e) { errors.push('Row ' + it.row + ': ' + e.message); }
+    });
+    var deleted = 0;
+    p.deletes.forEach(function (id) {
+      try { Calendar.Events.remove(calId, id); deleted++; } catch (e) { if (String(e).indexOf('Not Found') < 0 && String(e).indexOf('410') < 0) errors.push('Delete ' + id + ': ' + e.message); }
+      delete known[id];
+    });
+    idWrites.forEach(function (w) { sheet.getRange(w.row, idCol).setValue(w.value); });
+    saveKnownIds_(sheet, Object.keys(known));
+    var changes = p.counts.create + p.counts.update + deleted - errors.filter(function (x) { return x.indexOf('Row') === 0; }).length;
+    addUsage_(changes);
+    log_(ss, fromTrigger ? 'auto-sync' : 'sync', sheet.getName(), p.counts.create, p.counts.update, deleted, p.counts.skip, errors);
+    return { counts: p.counts, deleted: deleted, errors: errors, usage: usageThisMonth_() };
+  } finally { lock.releaseLock(); }
+}
+
+// ---------- import from calendar ----------
+function importEvents(fromIso, toIso) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), sheet = ss.getActiveSheet();
+  var settings = getSettings_(sheet);
+  if (!settings.calendarId) return { error: 'Pick a calendar first.' };
+  var tz = ss.getSpreadsheetTimeZone();
+  var headers = headers_(sheet);
+  var map;
+  if (!headers.length || headers.every(function (h) { return h === ''; })) {
+    headers = ['Title', 'Start', 'End', 'All day', 'Location', 'Description', ROWCAL.ID_HEADER];
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+    sheet.hideColumns(headers.length);
+    map = ROWCAL.autoMap(headers);
+  } else {
+    map = effectiveMap_(sheet, settings);
+    if (map.title < 0 || map.start < 0) return { error: 'Map Title and Start columns first, or import into an empty sheet.' };
+    map.id = ensureIdColumn_(sheet, map);
+  }
+  var existing = {};
+  readRows_(sheet).forEach(function (r) { var id = ROWCAL.parseIdCell(r[map.id]).eventId; if (id) existing[id] = true; });
+  var items = [], token;
+  do {
+    var res = Calendar.Events.list(settings.calendarId, { timeMin: fromIso, timeMax: toIso, singleEvents: true, orderBy: 'startTime', maxResults: 2500, pageToken: token });
+    items = items.concat(res.items || []); token = res.nextPageToken;
+  } while (token);
+  var width = Math.max(sheet.getLastColumn(), map.id + 1);
+  var out = [], known = knownIds_(sheet);
+  items.forEach(function (ev) {
+    if (!ev.summary || existing[ev.id]) return;
+    var allDay = !!(ev.start && ev.start.date);
+    var start = allDay ? parseYmd_(ev.start.date) : new Date(ev.start.dateTime);
+    var end = allDay ? parseYmd_(ev.end.date) : new Date(ev.end.dateTime);
+    var row = []; for (var i = 0; i < width; i++) row.push('');
+    row[map.title] = ev.summary;
+    row[map.start] = start;
+    if (map.end >= 0) row[map.end] = allDay ? new Date(end.getTime() - 86400000) : end;
+    if (map.allDay >= 0) row[map.allDay] = allDay;
+    if (map.location >= 0) row[map.location] = ev.location || '';
+    if (map.description >= 0) row[map.description] = ev.description || '';
+    var d = ROWCAL.buildDesired(row, map, settings);
+    row[map.id] = d.skip ? ev.id : ROWCAL.formatIdCell(ev.id, ROWCAL.desiredHash(d));
+    known.push(ev.id);
+    out.push(row);
+  });
+  if (out.length) sheet.getRange(sheet.getLastRow() + 1, 1, out.length, width).setValues(out);
+  saveKnownIds_(sheet, known);
+  log_(ss, 'import', sheet.getName(), out.length, 0, 0, items.length - out.length, []);
+  return { imported: out.length, skipped: items.length - out.length };
+}
+function parseYmd_(s) { var m = s.split('-'); return new Date(+m[0], +m[1] - 1, +m[2]); }
+
+// ---------- auto-sync (Pro) ----------
+function hasTrigger_() {
+  return ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'autoSync'; });
+}
+function setAutoSync(on) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'autoSync') ScriptApp.deleteTrigger(t); });
+  if (on) {
+    if (!licenseState_().pro) return { error: 'Hourly auto-sync is a Pro feature.' };
+    docProps_().setProperty('rowcal_trigger_sheet', String(ss.getActiveSheet().getSheetId()));
+    ScriptApp.newTrigger('autoSync').forSpreadsheet(ss).onChange().create();
+    ScriptApp.newTrigger('autoSync').timeBased().everyHours(1).create();
+  }
+  return getState();
+}
+function triggerSheet_(ss) {
+  var id = docProps_().getProperty('rowcal_trigger_sheet');
+  return ss.getSheets().filter(function (s) { return String(s.getSheetId()) === id; })[0];
+}
+function autoSync() { sync(true); }
+
+// ---------- usage & licence ----------
+function userProps_() { return PropertiesService.getUserProperties(); }
+function usageThisMonth_() { return Number(userProps_().getProperty('rowcal_usage_' + ROWCAL.monthKey()) || 0); }
+function addUsage_(n) { if (n > 0) userProps_().setProperty('rowcal_usage_' + ROWCAL.monthKey(), String(usageThisMonth_() + n)); }
+
+function licenseState_() {
+  var email = userProps_().getProperty('rowcal_license_email');
+  var until = Number(userProps_().getProperty('rowcal_license_until') || 0);
+  if (!email) return { pro: false };
+  if (until > Date.now()) return { pro: true, email: email };
+  var ok = stripeHasActiveSubscription_(email);
+  if (ok === null) return { pro: until > Date.now() - 7 * 86400000, email: email }; // Stripe unreachable: 7-day grace
+  userProps_().setProperty('rowcal_license_until', String(Date.now() + (ok ? 86400000 : 0)));
+  return { pro: ok, email: email };
+}
+/** Returns true/false, or null when Stripe cannot be reached. Uses a read-only restricted key. */
+function stripeHasActiveSubscription_(email) {
+  var key = PropertiesService.getScriptProperties().getProperty('STRIPE_RESTRICTED_KEY');
+  if (!key) return false;
+  try {
+    var h = { headers: { Authorization: 'Bearer ' + key }, muteHttpExceptions: true };
+    var q = "email:'" + email.replace(/'/g, "\\'") + "'";
+    var cr = UrlFetchApp.fetch('https://api.stripe.com/v1/customers/search?query=' + encodeURIComponent(q), h);
+    if (cr.getResponseCode() !== 200) return null;
+    var customers = JSON.parse(cr.getContentText()).data || [];
+    for (var i = 0; i < customers.length; i++) {
+      var sr = UrlFetchApp.fetch('https://api.stripe.com/v1/subscriptions?customer=' + customers[i].id + '&status=active&limit=1', h);
+      if (sr.getResponseCode() === 200 && (JSON.parse(sr.getContentText()).data || []).length) return true;
+    }
+    return false;
+  } catch (e) { return null; }
+}
+function activateLicense(email) {
+  email = String(email || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { error: 'Enter the email you used at checkout.' };
+  var ok = stripeHasActiveSubscription_(email);
+  if (ok === null) return { error: 'Could not reach the licence server. Try again in a minute.' };
+  if (!ok) return { error: 'No active Rowcal Pro subscription found for ' + email + '.' };
+  userProps_().setProperties({ rowcal_license_email: email, rowcal_license_until: String(Date.now() + 86400000) });
+  return getState();
+}
+function removeLicense() { userProps_().deleteProperty('rowcal_license_email'); userProps_().deleteProperty('rowcal_license_until'); return getState(); }
+
+// ---------- log ----------
+function log_(ss, action, sheetName, created, updated, deleted, skipped, errors) {
+  var sh = ss.getSheetByName(LOG_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(LOG_SHEET);
+    sh.appendRow(['When', 'Action', 'Sheet', 'Created', 'Updated', 'Deleted', 'Skipped', 'Errors']);
+    sh.getRange(1, 1, 1, 8).setFontWeight('bold');
+    sh.hideSheet();
+  }
+  sh.appendRow([new Date(), action, sheetName, created, updated, deleted, skipped, errors.join('\n')]);
+}
+function showLog() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), sh = ss.getSheetByName(LOG_SHEET);
+  if (!sh) return { error: 'No runs yet.' };
+  sh.showSheet(); ss.setActiveSheet(sh); return {};
+}

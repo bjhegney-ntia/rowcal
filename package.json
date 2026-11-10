@@ -1,0 +1,19 @@
+{
+  "name": "rowcal",
+  "version": "1.0.0",
+  "description": "Google Sheets add-on: rows → Calendar events with a preview first. Apps Script, no servers.",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@google/clasp": "^3.4.1"
+  }
+}

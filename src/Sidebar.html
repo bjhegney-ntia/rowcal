@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html><head><base target="_top">
+<style>
+  body{font:13px/1.45 -apple-system,Roboto,Arial,sans-serif;color:#202124;margin:0;padding:12px 14px 24px}
+  h2{font-size:15px;margin:0 0 4px} h3{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#5f6368;margin:18px 0 6px}
+  label{display:block;font-size:12px;color:#5f6368;margin-top:8px} select,input[type=text],input[type=email],input[type=date],input[type=number]{width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #dadce0;border-radius:6px;font:inherit;margin-top:2px}
+  .row{display:flex;gap:8px} .row>*{flex:1}
+  button{font:inherit;padding:8px 12px;border-radius:6px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-top:10px}
+  button.primary{background:#1a73e8;color:#fff;border-color:#1a73e8} button:disabled{opacity:.5;cursor:default}
+  .card{background:#f8f9fa;border:1px solid #e8eaed;border-radius:8px;padding:10px 12px;margin-top:10px}
+  .counts span{display:inline-block;margin-right:10px} .ok{color:#188038} .warn{color:#b06000} .err{color:#c5221f}
+  table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px} td{padding:3px 4px;border-top:1px solid #e8eaed;vertical-align:top}
+  .muted{color:#5f6368;font-size:12px} .small{font-size:11px} a{color:#1a73e8}
+  #status{min-height:18px;margin-top:8px}
+  .check{display:flex;align-items:center;gap:8px;margin-top:8px;color:#202124;font-size:13px}
+</style></head><body>
+<h2>Rowcal</h2>
+<div class="muted">Rows in <b id="sheetName"></b> become calendar events. Nothing changes until you press Sync.</div>
+
+<h3>1. Calendar</h3>
+<select id="calendarId"></select>
+
+<h3>2. Columns</h3>
+<div id="mapping"></div>
+<div class="row">
+  <div><label>If no end: event lasts (min)</label><input type="number" id="defaultMinutes" min="5" step="5"></div>
+</div>
+<label class="check"><input type="checkbox" id="deleteRemoved"> Delete events whose rows were removed</label>
+
+<h3>3. Preview, then sync</h3>
+<button class="primary" id="previewBtn" onclick="doPreview()">Preview changes</button>
+<div id="previewBox"></div>
+<button id="syncBtn" onclick="doSync()" disabled>Sync to calendar</button>
+<div id="status"></div>
+
+<h3>Import from calendar</h3>
+<div class="row">
+  <div><label>From</label><input type="date" id="fromDate"></div>
+  <div><label>To</label><label></label><input type="date" id="toDate"></div>
+</div>
+<button onclick="doImport()">Import events into this sheet</button>
+<div class="small muted">Imported rows are tracked, so editing them later updates the event.</div>
+
+<h3>Plan</h3>
+<div class="card" id="planBox"></div>
+
+<div class="small muted" style="margin-top:16px"><a href="#" onclick="google.script.run.showLog();return false;">Show run log</a> · <a href="https://rowcal.app/privacy" target="_blank">Privacy</a></div>
+
+<script>
+var S = null, lastPlan = null;
+var LABELS = {title:'Title *', start:'Start date *', startTime:'Start time', end:'End date', endTime:'End time', description:'Description', location:'Location', allDay:'All day (yes/no)', calendar:'(unused)'};
+function run(fn){ var args=[].slice.call(arguments,1); return new Promise(function(res,rej){ var r=google.script.run.withSuccessHandler(res).withFailureHandler(function(e){rej(e)}); r[fn].apply(r,args); }); }
+function status(msg, cls){ var el=document.getElementById('status'); el.className=cls||''; el.textContent=msg||''; }
+function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]}); }
+
+function render(state){
+  S = state;
+  document.getElementById('sheetName').textContent = S.sheetName;
+  var cal = document.getElementById('calendarId');
+  cal.innerHTML = '<option value="">Choose a calendar…</option>' + S.calendars.map(function(c){ return '<option value="'+esc(c.id)+'"'+(c.id===S.settings.calendarId?' selected':'')+'>'+esc(c.name)+(c.primary?' (primary)':'')+'</option>'; }).join('');
+  cal.onchange = function(){ save({calendarId: cal.value}); };
+  var m = document.getElementById('mapping'); m.innerHTML='';
+  S.fields.filter(function(f){return f!=='calendar'}).forEach(function(f){
+    var sel = document.createElement('select'); sel.id='map_'+f;
+    sel.innerHTML = '<option value="-1">—</option>' + S.headers.map(function(h){ return '<option value="'+h.i+'"'+(S.map[f]===h.i?' selected':'')+'>'+esc(h.name)+'</option>'; }).join('');
+    sel.onchange = function(){ var o = S.settings.mapOverrides||{}; o[f]=Number(sel.value); save({mapOverrides:o}); };
+    var lab = document.createElement('label'); lab.textContent = LABELS[f]; lab.appendChild(sel); m.appendChild(lab);
+  });
+  var dm = document.getElementById('defaultMinutes'); dm.value = S.settings.defaultMinutes; dm.onchange=function(){ save({defaultMinutes: Number(dm.value)||60}); };
+  var dr = document.getElementById('deleteRemoved'); dr.checked = !!S.settings.deleteRemoved; dr.onchange=function(){ save({deleteRemoved: dr.checked}); };
+  var now = new Date(), first = new Date(now.getFullYear(), now.getMonth(), 1), last = new Date(now.getFullYear(), now.getMonth()+1, 0);
+  if(!document.getElementById('fromDate').value){ document.getElementById('fromDate').value = iso(first); document.getElementById('toDate').value = iso(last); }
+  renderPlan();
+}
+function iso(d){ return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
+function save(patch){ run('saveSettings', patch).then(render).catch(function(e){status(e.message,'err')}); document.getElementById('syncBtn').disabled=true; }
+
+function renderPlan(){
+  var b = document.getElementById('planBox');
+  if (S.pro) {
+    b.innerHTML = '<b>Rowcal Pro</b> · unlimited changes, hourly auto-sync<br><span class="small muted">'+esc(S.licenseEmail)+' · <a href="#" onclick="run(\'removeLicense\').then(render);return false;">sign out</a></span>' +
+      '<label class="check"><input type="checkbox" id="autoSync" '+(S.autoSync?'checked':'')+' onchange="toggleAuto(this.checked)"> Auto-sync this sheet every hour and on edits</label>';
+  } else {
+    var left = Math.max(0, S.freeLimit - S.usage);
+    b.innerHTML = '<b>Free plan</b> · <span class="'+(left<10?'warn':'')+'">'+left+' of '+S.freeLimit+' event changes left this month</span>' +
+      '<div class="small muted" style="margin-top:4px">Pro: unlimited changes + hourly auto-sync.</div>' +
+      (S.upgradeUrl ? '<a href="'+esc(S.upgradeUrl)+'" target="_blank"><button class="primary" style="margin-top:8px">Upgrade to Pro</button></a>' : '') +
+      '<label>Already paid? Enter your checkout email</label><div class="row"><input type="email" id="licEmail" placeholder="you@example.com"><button style="margin-top:2px;flex:0" onclick="activate()">Activate</button></div>';
+  }
+}
+function toggleAuto(on){ run('setAutoSync', on).then(function(r){ if(r.error){status(r.error,'err');} render(r.error?S:r); }).catch(function(e){status(e.message,'err')}); }
+function activate(){ status('Checking…'); run('activateLicense', document.getElementById('licEmail').value).then(function(r){ if(r.error){status(r.error,'err');return;} status('Pro activated.','ok'); render(r); }).catch(function(e){status(e.message,'err')}); }
+
+function doPreview(){
+  status('Reading rows…'); document.getElementById('previewBtn').disabled=true;
+  run('preview').then(function(p){
+    document.getElementById('previewBtn').disabled=false;
+    if(p.error){ status(p.error,'err'); document.getElementById('previewBox').innerHTML=''; return; }
+    lastPlan = p; status('');
+    var c = p.counts, html = '<div class="card"><div class="counts"><span class="ok">+'+c.create+' create</span><span>'+c.update+' update</span><span>'+c.delete+' delete</span><span class="muted">'+c.unchanged+' unchanged</span><span class="muted">'+c.skip+' skipped</span></div>';
+    if (p.sample.length) {
+      html += '<table>' + p.sample.map(function(s){ return '<tr><td class="muted">'+s.row+'</td><td>'+esc(s.action)+(s.reason?' <span class="warn">('+esc(s.reason)+')</span>':'')+'</td><td>'+esc(s.title)+'</td><td class="muted">'+esc(s.when)+'</td></tr>'; }).join('') + '</table>';
+      if (c.changes + c.skip > p.sample.length) html += '<div class="small muted">Showing first '+p.sample.length+'.</div>';
+    }
+    if (!p.lic.pro && p.usage + c.changes > p.freeLimit) html += '<div class="warn" style="margin-top:6px">Needs '+c.changes+' changes; '+(p.freeLimit-p.usage)+' left on the free plan this month.</div>';
+    html += '</div>';
+    document.getElementById('previewBox').innerHTML = html;
+    document.getElementById('syncBtn').disabled = c.changes === 0;
+    document.getElementById('syncBtn').textContent = c.changes ? 'Sync '+c.changes+' change'+(c.changes===1?'':'s')+' to calendar' : 'Nothing to sync';
+  }).catch(function(e){ document.getElementById('previewBtn').disabled=false; status(e.message,'err'); });
+}
+function doSync(){
+  status('Syncing…'); document.getElementById('syncBtn').disabled=true;
+  run('sync', false).then(function(r){
+    if(r.error){ status(r.error,'err'); return; }
+    var msg = 'Done: '+r.counts.create+' created, '+r.counts.update+' updated, '+r.deleted+' deleted.';
+    if (r.errors.length) msg += ' '+r.errors.length+' error'+(r.errors.length>1?'s':'')+' (see run log).';
+    status(msg, r.errors.length?'warn':'ok'); document.getElementById('previewBox').innerHTML='';
+    run('getState').then(render);
+  }).catch(function(e){ status(e.message,'err'); });
+}
+function doImport(){
+  var f = document.getElementById('fromDate').value, t = document.getElementById('toDate').value;
+  if(!f||!t){ status('Pick a date range.','err'); return; }
+  status('Importing…');
+  run('importEvents', new Date(f+'T00:00:00').toISOString(), new Date(t+'T23:59:59').toISOString()).then(function(r){
+    if(r.error){ status(r.error,'err'); return; }
+    status('Imported '+r.imported+' event'+(r.imported===1?'':'s')+(r.skipped?' ('+r.skipped+' already in the sheet or untitled)':'')+'.','ok');
+    run('getState').then(render);
+  }).catch(function(e){ status(e.message,'err'); });
+}
+run('getState').then(render).catch(function(e){ status(e.message,'err'); });
+</script></body></html>
