@@ -92,13 +92,13 @@ function save(patch){ run('saveSettings', patch, S.sheetId).then(render).catch(f
 function renderPlan(){
   var b = document.getElementById('planBox');
   if (S.pro) {
-    b.innerHTML = '<b>Minutehand Pro</b> · unlimited changes, hourly auto-sync<br><span class="small muted">'+esc(S.licenseEmail)+' · <a href="#" onclick="run(\'removeLicense\', S.sheetId).then(render);return false;">sign out</a></span>' +
+    b.innerHTML = '<b>Minutehand Pro</b> · unlimited changes, hourly auto-sync, yours for life<br><span class="small muted">'+esc(S.licenseEmail)+' · <a href="#" onclick="run(\'removeLicense\', S.sheetId).then(render);return false;">sign out</a></span>' +
       '<label class="check"><input type="checkbox" id="autoSync" '+(S.autoSync?'checked':'')+' onchange="toggleAuto(this.checked)"> Auto-sync this sheet every hour</label>';
   } else {
     var left = Math.max(0, S.freeLimit - S.usage);
     b.innerHTML = '<b>Free plan</b> · <span class="'+(left<10?'warn':'')+'">'+left+' of '+S.freeLimit+' event changes left this month</span>' +
-      '<div class="small muted" style="margin-top:4px">Pro: unlimited changes + hourly auto-sync.</div>' +
-      (S.upgradeUrl ? '<a href="'+esc(S.upgradeUrl)+'" target="_blank"><button class="primary" style="margin-top:8px">Upgrade to Pro</button></a>' : '') +
+      '<div class="small muted" style="margin-top:4px">Pro: unlimited changes + hourly auto-sync. One payment, no subscription.</div>' +
+      (S.upgradeUrl ? '<a href="'+esc(S.upgradeUrl)+'" target="_blank"><button class="primary" style="margin-top:8px">Get Pro for life</button></a>' : '') +
       '<label>Already paid? Enter your checkout email</label><div class="row"><input type="email" id="licEmail" placeholder="you@example.com"><button style="margin-top:2px;flex:0" onclick="activate()">Activate</button></div>';
   }
 }

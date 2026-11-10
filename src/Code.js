@@ -316,34 +316,35 @@ function licenseState_() {
   var until = Number(userProps_().getProperty('rowcal_license_until') || 0);
   if (!email) return { pro: false };
   if (until > Date.now()) return { pro: true, email: email };
-  var ok = stripeHasActiveSubscription_(email);
+  var ok = stripeHasPurchase_(email);
   if (ok === null) return { pro: until > Date.now() - 7 * 86400000, email: email }; // Stripe unreachable: 7-day grace
   userProps_().setProperty('rowcal_license_until', String(Date.now() + (ok ? 86400000 : 0)));
   return { pro: ok, email: email };
 }
-/** Returns true/false, or null when Stripe cannot be reached. Uses a read-only restricted key. */
-function stripeHasActiveSubscription_(email) {
-  var key = PropertiesService.getScriptProperties().getProperty('STRIPE_RESTRICTED_KEY');
-  if (!key) return false;
+/**
+ * Pro is a one-time purchase through a Stripe Payment Link. Returns true/false, or null when Stripe cannot be reached.
+ * Script properties: STRIPE_RESTRICTED_KEY (read-only: Checkout Sessions) and STRIPE_PAYMENT_LINK (the plink_ id, so
+ * other sales on the same Stripe account never unlock Pro).
+ */
+function stripeHasPurchase_(email) {
+  var props = PropertiesService.getScriptProperties();
+  var key = props.getProperty('STRIPE_RESTRICTED_KEY'), link = props.getProperty('STRIPE_PAYMENT_LINK');
+  if (!key || !link) return false;
   try {
-    var h = { headers: { Authorization: 'Bearer ' + key }, muteHttpExceptions: true };
-    var q = "email:'" + email.replace(/'/g, "\\'") + "'";
-    var cr = UrlFetchApp.fetch('https://api.stripe.com/v1/customers/search?query=' + encodeURIComponent(q), h);
-    if (cr.getResponseCode() !== 200) return null;
-    var customers = JSON.parse(cr.getContentText()).data || [];
-    for (var i = 0; i < customers.length; i++) {
-      var sr = UrlFetchApp.fetch('https://api.stripe.com/v1/subscriptions?customer=' + customers[i].id + '&status=active&limit=1', h);
-      if (sr.getResponseCode() === 200 && (JSON.parse(sr.getContentText()).data || []).length) return true;
-    }
-    return false;
+    var url = 'https://api.stripe.com/v1/checkout/sessions?status=complete&limit=10&payment_link=' + encodeURIComponent(link) +
+      '&' + encodeURIComponent('customer_details[email]') + '=' + encodeURIComponent(email);
+    var r = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + key }, muteHttpExceptions: true });
+    if (r.getResponseCode() !== 200) return null;
+    return (JSON.parse(r.getContentText()).data || []).some(function (s) { return s.payment_status === 'paid'; });
   } catch (e) { return null; }
 }
 function activateLicense(email, sheetId) {
-  email = String(email || '').trim().toLowerCase();
+  email = String(email || '').trim();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { error: 'Enter the email you used at checkout.' };
-  var ok = stripeHasActiveSubscription_(email);
+  var ok = stripeHasPurchase_(email);
+  if (ok === false && email !== email.toLowerCase()) { email = email.toLowerCase(); ok = stripeHasPurchase_(email); }
   if (ok === null) return { error: 'Could not reach the licence server. Try again in a minute.' };
-  if (!ok) return { error: 'No active Minutehand Pro subscription found for ' + email + '.' };
+  if (!ok) return { error: 'No Minutehand Pro purchase found for ' + email + '. Type the email exactly as you did at checkout.' };
   userProps_().setProperties({ rowcal_license_email: email, rowcal_license_until: String(Date.now() + 86400000) });
   return getState(sheetId);
 }
